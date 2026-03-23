@@ -44,11 +44,11 @@ function createRequest(urlPath) {
   return new Request(`http://localhost${urlPath}`);
 }
 
-function bench(label, fn, iterations = 10000) {
-  fn();
+async function bench(label, fn, iterations = 10000) {
+  await fn();
   const start = performance.now();
   for (let i = 0; i < iterations; i++) {
-    fn();
+    await fn();
   }
   const elapsed = performance.now() - start;
   const perOp = (elapsed / iterations).toFixed(4);
@@ -70,7 +70,10 @@ function benchStaticRouting(RainClass, routeCount) {
   const app = new RainClass();
   generateRoutes(app, routeCount);
   const req = createRequest(`/route${routeCount - 1}/path`);
-  return bench(`静的マッチ (最悪, ${routeCount} ルート)`, () => app.fetch(req));
+  return bench(
+    `静的マッチ (最悪, ${routeCount} ルート)`,
+    async () => await app.fetch(req),
+  );
 }
 
 function benchDynamicRouting(RainClass, routeCount, paramCount) {
@@ -82,7 +85,7 @@ function benchDynamicRouting(RainClass, routeCount, paramCount) {
   const req = createRequest(`/dyn${routeCount - 1}/${segments}`);
   return bench(
     `動的マッチ (${paramCount} パラメータ, ${routeCount} ルート)`,
-    () => app.fetch(req),
+    async () => await app.fetch(req),
   );
 }
 
@@ -90,7 +93,10 @@ function benchNotFound(RainClass, routeCount) {
   const app = new RainClass();
   generateRoutes(app, routeCount);
   const req = createRequest("/nonexistent/path");
-  return bench(`404 ミス (${routeCount} ルート)`, () => app.fetch(req));
+  return bench(
+    `404 ミス (${routeCount} ルート)`,
+    async () => await app.fetch(req),
+  );
 }
 
 function benchBundleSize() {
@@ -169,7 +175,7 @@ function printTable(results) {
   }
 }
 
-function main() {
+async function main() {
   console.log("Rain.js パフォーマンスベンチマーク");
   console.log(`Node ${process.version} | ${process.platform} ${process.arch}`);
   console.log("=".repeat(60));
@@ -183,33 +189,33 @@ function main() {
 
   console.log("\n## ルート登録\n");
   const regResults = [
-    benchRouteRegistration(Rain, 10),
-    benchRouteRegistration(Rain, 50),
-    benchRouteRegistration(Rain, 100),
+    await benchRouteRegistration(Rain, 10),
+    await benchRouteRegistration(Rain, 50),
+    await benchRouteRegistration(Rain, 100),
   ];
   printTable(regResults);
 
   console.log("\n## 静的ルートマッチング (最悪ケース: 末尾ルート)\n");
   const staticResults = [
-    benchStaticRouting(Rain, 10),
-    benchStaticRouting(Rain, 50),
-    benchStaticRouting(Rain, 100),
+    await benchStaticRouting(Rain, 10),
+    await benchStaticRouting(Rain, 50),
+    await benchStaticRouting(Rain, 100),
   ];
   printTable(staticResults);
 
   console.log("\n## 動的ルートマッチング\n");
   const dynResults = [
-    benchDynamicRouting(Rain, 50, 1),
-    benchDynamicRouting(Rain, 50, 3),
-    benchDynamicRouting(Rain, 50, 5),
+    await benchDynamicRouting(Rain, 50, 1),
+    await benchDynamicRouting(Rain, 50, 3),
+    await benchDynamicRouting(Rain, 50, 5),
   ];
   printTable(dynResults);
 
   console.log("\n## 404 該当なし (全ルート走査)\n");
   const notFoundResults = [
-    benchNotFound(Rain, 10),
-    benchNotFound(Rain, 50),
-    benchNotFound(Rain, 100),
+    await benchNotFound(Rain, 10),
+    await benchNotFound(Rain, 50),
+    await benchNotFound(Rain, 100),
   ];
   printTable(notFoundResults);
 
@@ -217,4 +223,4 @@ function main() {
   console.log("完了");
 }
 
-main();
+main().catch(console.error);

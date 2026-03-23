@@ -1,7 +1,7 @@
 export type Handler = (
   req: Request,
   params: Record<string, string>,
-) => Response;
+) => Response | Promise<Response>;
 
 interface Route {
   method: string;
@@ -44,7 +44,7 @@ export class Rain {
     this.addRoute("DELETE", path, handler);
   }
 
-  fetch(request: Request): Response {
+  async fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
     const method = request.method;
 
@@ -61,7 +61,7 @@ export class Rain {
           }
         });
 
-        return route.handler(request, params);
+        return await route.handler(request, params);
       }
     }
 
