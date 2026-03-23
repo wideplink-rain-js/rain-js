@@ -2,7 +2,13 @@ const { buildSync } = require("esbuild");
 const path = require("node:path");
 const { performance } = require("node:perf_hooks");
 
-const FRAMEWORK_PATH = path.join(__dirname, "..", "src", "framework", "index.ts");
+const FRAMEWORK_PATH = path.join(
+  __dirname,
+  "..",
+  "src",
+  "framework",
+  "index.ts",
+);
 
 function loadFramework() {
   const result = buildSync({
@@ -99,6 +105,100 @@ function benchNotFound(RainClass, routeCount) {
   );
 }
 
+function benchCreateElement(createElement, Fragment) {
+  const simpleEl = () => createElement("div", { className: "box" }, "hello");
+  const nestedEl = () =>
+    createElement(
+      "div",
+      { id: "root" },
+      createElement("h1", null, "title"),
+      createElement("p", { className: "text" }, "body"),
+      createElement(
+        "ul",
+        null,
+        ...Array.from({ length: 10 }, (_, i) =>
+          createElement("li", { key: String(i) }, `item ${i}`),
+        ),
+      ),
+    );
+  const fragmentEl = () =>
+    createElement(
+      Fragment,
+      null,
+      createElement("span", null, "a"),
+      createElement("span", null, "b"),
+      createElement("span", null, "c"),
+    );
+
+  return {
+    simple: () => bench("createElement (単純)", simpleEl),
+    nested: () => bench("createElement (ネスト)", nestedEl),
+    fragment: () => bench("createElement (Fragment)", fragmentEl),
+  };
+}
+
+function benchRenderToString(createElement, _Fragment, renderToString) {
+  const simpleTree = createElement("div", { className: "box" }, "hello");
+  const deepTree = Array.from({ length: 20 }).reduce(
+    (child) => createElement("div", null, child),
+    createElement("span", null, "leaf"),
+  );
+  const wideTree = createElement(
+    "table",
+    null,
+    createElement(
+      "tbody",
+      null,
+      ...Array.from({ length: 50 }, (_, i) =>
+        createElement(
+          "tr",
+          null,
+          createElement("td", null, `cell-${i}-0`),
+          createElement("td", null, `cell-${i}-1`),
+          createElement("td", null, `cell-${i}-2`),
+        ),
+      ),
+    ),
+  );
+  const Component = (props) =>
+    createElement(
+      "div",
+      { className: "component" },
+      createElement("h2", null, props.title),
+      createElement("p", null, props.children),
+    );
+  const componentTree = createElement(Component, { title: "Hello" }, "world");
+
+  return {
+    simple: () =>
+      bench("renderToString (単純)", () => renderToString(simpleTree)),
+    deep: () =>
+      bench("renderToString (深いネスト, 20層)", () =>
+        renderToString(deepTree),
+      ),
+    wide: () =>
+      bench("renderToString (50行テーブル)", () => renderToString(wideTree)),
+    component: () =>
+      bench("renderToString (コンポーネント)", () =>
+        renderToString(componentTree),
+      ),
+  };
+}
+
+function benchEscapeHtml(escapeHtml) {
+  const noEscape = "Hello World 1234567890 abcdefg";
+  const lightEscape = 'Hello <b>World</b> & "Rain.js"';
+  const heavyEscape =
+    '<script>alert("xss")</script>&<div class="a">\'test\'</div>';
+
+  return {
+    none: () =>
+      bench("escapeHtml (エスケープなし)", () => escapeHtml(noEscape)),
+    light: () => bench("escapeHtml (軽度)", () => escapeHtml(lightEscape)),
+    heavy: () => bench("escapeHtml (重度)", () => escapeHtml(heavyEscape)),
+  };
+}
+
 function benchBundleSize() {
   const result = buildSync({
     entryPoints: [FRAMEWORK_PATH],
@@ -180,7 +280,8 @@ async function main() {
   console.log(`Node ${process.version} | ${process.platform} ${process.arch}`);
   console.log("=".repeat(60));
 
-  const { Rain } = loadFramework();
+  const { Rain, createElement, Fragment, renderToString, escapeHtml } =
+    loadFramework();
 
   console.log("\n## バンドルサイズ\n");
   const size = benchBundleSize();
@@ -218,6 +319,38 @@ async function main() {
     await benchNotFound(Rain, 100),
   ];
   printTable(notFoundResults);
+
+  console.log("\n## JSX createElement\n");
+  const createElBenches = benchCreateElement(createElement, Fragment);
+  const createElResults = [
+    await createElBenches.simple(),
+    await createElBenches.nested(),
+    await createElBenches.fragment(),
+  ];
+  printTable(createElResults);
+
+  console.log("\n## JSX renderToString\n");
+  const renderBenches = benchRenderToString(
+    createElement,
+    Fragment,
+    renderToString,
+  );
+  const renderResults = [
+    await renderBenches.simple(),
+    await renderBenches.deep(),
+    await renderBenches.wide(),
+    await renderBenches.component(),
+  ];
+  printTable(renderResults);
+
+  console.log("\n## HTML エスケープ\n");
+  const escapeBenches = benchEscapeHtml(escapeHtml);
+  const escapeResults = [
+    await escapeBenches.none(),
+    await escapeBenches.light(),
+    await escapeBenches.heavy(),
+  ];
+  printTable(escapeResults);
 
   console.log(`\n${"=".repeat(60)}`);
   console.log("完了");

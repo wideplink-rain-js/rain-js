@@ -22,10 +22,19 @@
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
 
+    /* JSX */
+    "jsx": "react-jsx",
+    "jsxImportSource": "rain-js",
+
+    /* パス解決 */
+    "paths": {
+      "rain-js/jsx-runtime": ["./src/framework/jsx-runtime.ts"]
+    },
+
     /* 出力 */
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", ".rainjs/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", ".rainjs/**/*.ts"],
   "exclude": ["node_modules", "scripts"]
 }

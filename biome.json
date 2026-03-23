@@ -105,6 +105,19 @@
           }
         }
       }
+    },
+    {
+      "includes": [
+        "src/framework/jsx/jsx-namespace.ts",
+        "src/framework/jsx-runtime.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noNamespace": "off"
+          }
+        }
+      }
     }
   ]
 }

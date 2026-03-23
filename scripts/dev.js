@@ -18,7 +18,7 @@ function getRouteFiles(dir, base = "") {
 
     if (entry.isDirectory()) {
       files.push(...getRouteFiles(fullPath, relativePath));
-    } else if (entry.name === "route.ts") {
+    } else if (entry.name === "route.ts" || entry.name === "route.tsx") {
       files.push(relativePath);
     }
   }
@@ -55,7 +55,7 @@ function middlewarePathToDir(filePath) {
 function routePathToDir(filePath) {
   return filePath
     .replace(/\\/g, "/")
-    .replace(/route\.ts$/, "")
+    .replace(/route\.tsx?$/, "")
     .replace(/\/$/, "");
 }
 
@@ -95,7 +95,7 @@ function getMiddlewaresForRoute(routeFile, middlewareFiles) {
 }
 
 function filePathToUrlPath(filePath) {
-  let urlPath = filePath.replace(/\.ts$/, "");
+  let urlPath = filePath.replace(/\.tsx?$/, "");
   urlPath = urlPath.replace(/\\/g, "/");
   urlPath = urlPath.replace(/\[([^\]]+)\]/g, ":$1");
   urlPath = urlPath.replace(/\/route$/, "");
@@ -107,7 +107,7 @@ function filePathToImportName(filePath) {
   return (
     "route_" +
     filePath
-      .replace(/\.ts$/, "")
+      .replace(/\.tsx?$/, "")
       .replace(/\\/g, "_")
       .replace(/\//g, "_")
       .replace(/\[/g, "$")
@@ -158,7 +158,7 @@ function generate() {
       continue;
     }
     const name = middlewareImportName(mwFile);
-    const importPath = `../src/routes/${mwFile.replace(/\.ts$/, "").replace(/\\/g, "/")}`;
+    const importPath = `../src/routes/${mwFile.replace(/\.tsx?$/, "").replace(/\\/g, "/")}`;
     imports.push(`import { onRequest as ${name} } from "${importPath}";`);
     importedMiddlewares.add(name);
   }
@@ -166,7 +166,7 @@ function generate() {
   for (const file of files) {
     const importName = filePathToImportName(file);
     const urlPath = filePathToUrlPath(file);
-    const importPath = `../src/routes/${file.replace(/\.ts$/, "").replace(/\\/g, "/")}`;
+    const importPath = `../src/routes/${file.replace(/\.tsx?$/, "").replace(/\\/g, "/")}`;
     const fullPath = path.join(ROUTES_DIR, file);
 
     const methods = detectExportedMethods(fullPath);
@@ -216,7 +216,7 @@ generate();
 
 let debounceTimer = null;
 fs.watch(ROUTES_DIR, { recursive: true }, (eventType, filename) => {
-  if (!filename?.endsWith(".ts")) return;
+  if (!(filename?.endsWith(".ts") || filename?.endsWith(".tsx"))) return;
   clearTimeout(debounceTimer);
   debounceTimer = setTimeout(() => {
     console.log(`[watch] ${eventType}: ${filename}`);

@@ -17,6 +17,9 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "exports": {
+    "./jsx-runtime": "./src/framework/jsx-runtime.ts"
+  },
   "devDependencies": {
     "@biomejs/biome": "^2.4.8",
     "@cloudflare/workers-types": "^4.20260317.1",

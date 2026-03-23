@@ -1,3 +1,6 @@
+import { isRainElement, renderToString } from "./jsx";
+import type { RainElement } from "./jsx/types";
+
 export class Context {
   readonly req: Request;
   readonly params: Record<string, string>;
@@ -49,8 +52,11 @@ export class Context {
     });
   }
 
-  html(body: string, status = 200): Response {
-    return new Response(body, {
+  html(body: RainElement | string, status = 200): Response {
+    const htmlString = isRainElement(body)
+      ? renderToString(body)
+      : String(body);
+    return new Response(htmlString, {
       status,
       headers: { "content-type": "text/html; charset=UTF-8" },
     });
