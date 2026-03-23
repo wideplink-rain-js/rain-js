@@ -5,12 +5,18 @@ export class Context {
   readonly req: Request;
   readonly params: Record<string, string>;
   readonly state: Map<string, unknown>;
+  readonly bindings: Env;
   private cachedUrl: URL | undefined;
 
-  constructor(req: Request, params: Record<string, string>) {
+  constructor(
+    req: Request,
+    params: Record<string, string>,
+    env: Env = {} as Env,
+  ) {
     this.req = req;
     this.params = params;
     this.state = new Map();
+    this.bindings = env;
   }
 
   get url(): URL {

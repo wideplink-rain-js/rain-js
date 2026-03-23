@@ -6,7 +6,7 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "lib": ["ESNext"],
-    "types": ["@cloudflare/workers-types"],
+    "types": ["@cloudflare/workers-types", "node"],
 
     /* 厳格モード — 全有効 */
     "strict": true,
@@ -35,6 +35,11 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", ".rainjs/**/*.ts"],
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    ".rainjs/**/*.ts",
+    "worker-configuration.d.ts"
+  ],
   "exclude": ["node_modules", "scripts"]
 }

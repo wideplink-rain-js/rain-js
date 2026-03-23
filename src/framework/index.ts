@@ -1,3 +1,4 @@
+export { bindings } from "./bindings";
 export { Context } from "./context";
 export { HttpError } from "./errors";
 export type {

@@ -1,6 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
-const { spawn } = require("node:child_process");
+const { spawn, execSync } = require("node:child_process");
 
 const ROUTES_DIR = path.join(__dirname, "..", "src", "routes");
 const ENTRY_FILE = path.join(__dirname, "..", ".rainjs", "entry.ts");
@@ -137,6 +137,15 @@ function detectMiddlewareExport(filePath) {
 }
 
 function generate() {
+  try {
+    execSync("npx wrangler types", {
+      cwd: path.join(__dirname, ".."),
+      stdio: "pipe",
+      timeout: 30_000,
+    });
+  } catch (_wranglerTypesOptional) {
+  }
+
   const dir = path.dirname(ENTRY_FILE);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 

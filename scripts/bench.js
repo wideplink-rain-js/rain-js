@@ -18,6 +18,7 @@ function loadFramework() {
     format: "cjs",
     platform: "browser",
     target: "esnext",
+    external: ["node:async_hooks"],
   });
   const code = result.outputFiles[0].text;
   const mod = { exports: {} };
@@ -208,6 +209,7 @@ function benchBundleSize() {
     platform: "browser",
     target: "esnext",
     minify: true,
+    external: ["node:async_hooks"],
   });
   const minified = result.outputFiles[0].text;
   const { gzipSync } = require("node:zlib");

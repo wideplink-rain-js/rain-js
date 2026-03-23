@@ -1,5 +1,9 @@
 import type { Context } from "./context";
 
+declare global {
+  interface Env {}
+}
+
 export interface RainOptions {
   csrfProtection?: boolean;
 }

@@ -1,3 +1,4 @@
+import { runWithBindings } from "./bindings";
 import { Context } from "./context";
 import { HttpError } from "./errors";
 import type { ErrorHandler, Handler, Middleware, RainOptions } from "./types";
@@ -119,12 +120,25 @@ export class Rain {
     };
   }
 
-  async fetch(request: Request): Promise<Response> {
-    const response = await this.handleRequest(request);
-    return this.applySecurityHeaders(response);
+  fetch(
+    request: Request,
+    env?: Env,
+    _executionCtx?: ExecutionContext,
+  ): Promise<Response> {
+    const resolvedEnv = env ?? ({} as Env);
+    return runWithBindings(resolvedEnv, async () => {
+      const response = await this.handleRequest(
+        request,
+        resolvedEnv,
+      );
+      return this.applySecurityHeaders(response);
+    });
   }
 
-  private async handleRequest(request: Request): Promise<Response> {
+  private async handleRequest(
+    request: Request,
+    env: Env,
+  ): Promise<Response> {
     const csrfResponse = this.validateCsrf(request);
     if (csrfResponse) return csrfResponse;
 
@@ -150,7 +164,7 @@ export class Rain {
           }
         });
 
-        const ctx = new Context(request, params);
+        const ctx = new Context(request, params, env);
         const allMiddlewares =
           this.globalMiddlewares.length === 0
             ? route.middlewares
