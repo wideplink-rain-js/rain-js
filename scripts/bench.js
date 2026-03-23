@@ -70,10 +70,7 @@ function benchStaticRouting(RainClass, routeCount) {
   const app = new RainClass();
   generateRoutes(app, routeCount);
   const req = createRequest(`/route${routeCount - 1}/path`);
-  return bench(
-    `静的マッチ (最悪, ${routeCount} ルート)`,
-    () => app.fetch(req),
-  );
+  return bench(`静的マッチ (最悪, ${routeCount} ルート)`, () => app.fetch(req));
 }
 
 function benchDynamicRouting(RainClass, routeCount, paramCount) {
@@ -216,7 +213,7 @@ function main() {
   ];
   printTable(notFoundResults);
 
-  console.log("\n" + "=".repeat(60));
+  console.log(`\n${"=".repeat(60)}`);
   console.log("完了");
 }
 
