@@ -3,3 +3,5 @@ node_modules/
 .generated/
 docs/
 .vscode/
+.github/agents/*
+.github/copilot-instructions.md
