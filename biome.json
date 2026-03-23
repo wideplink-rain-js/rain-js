@@ -92,6 +92,16 @@
           }
         }
       }
+    },
+    {
+      "includes": ["src/framework.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
+          }
+        }
+      }
     }
   ]
 }

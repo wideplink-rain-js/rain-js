@@ -77,7 +77,14 @@ function generate() {
     const fullPath = path.join(ROUTES_DIR, file);
 
     const methods = detectExportedMethods(fullPath);
-    if (methods.length === 0) continue;
+    if (methods.length === 0) {
+      const relPath = `src/routes/${file.replace(/\\/g, "/")}`;
+      console.error(
+        `[Rain] No exported handlers found in ${relPath}. ` +
+          "Add an exported handler, e.g.: export const GET: Handler = (req, params) => { ... }",
+      );
+      continue;
+    }
 
     const importSpecifiers = methods
       .map((m) => `${m} as ${importName}_${m}`)
