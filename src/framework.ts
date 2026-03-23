@@ -2,11 +2,33 @@ export class Context {
   readonly req: Request;
   readonly params: Record<string, string>;
   readonly state: Map<string, unknown>;
+  private cachedUrl: URL | undefined;
 
   constructor(req: Request, params: Record<string, string>) {
     this.req = req;
     this.params = params;
     this.state = new Map();
+  }
+
+  get url(): URL {
+    this.cachedUrl ??= new URL(this.req.url);
+    return this.cachedUrl;
+  }
+
+  get path(): string {
+    return this.url.pathname;
+  }
+
+  get method(): string {
+    return this.req.method;
+  }
+
+  get query(): URLSearchParams {
+    return this.url.searchParams;
+  }
+
+  header(name: string): string | null {
+    return this.req.headers.get(name);
   }
 
   json(data: unknown, status = 200): Response {
