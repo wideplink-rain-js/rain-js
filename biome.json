@@ -94,11 +94,14 @@
       }
     },
     {
-      "includes": ["src/framework.ts"],
+      "includes": ["src/framework/**"],
       "linter": {
         "rules": {
           "suspicious": {
             "noConsole": "off"
+          },
+          "performance": {
+            "noBarrelFile": "off"
           }
         }
       }

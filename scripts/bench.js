@@ -2,7 +2,7 @@ const { buildSync } = require("esbuild");
 const path = require("node:path");
 const { performance } = require("node:perf_hooks");
 
-const FRAMEWORK_PATH = path.join(__dirname, "..", "src", "framework.ts");
+const FRAMEWORK_PATH = path.join(__dirname, "..", "src", "framework", "index.ts");
 
 function loadFramework() {
   const result = buildSync({
