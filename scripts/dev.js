@@ -3,7 +3,7 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 
 const ROUTES_DIR = path.join(__dirname, "..", "src", "routes");
-const ENTRY_FILE = path.join(__dirname, "..", ".generated", "entry.ts");
+const ENTRY_FILE = path.join(__dirname, "..", ".rainjs", "entry.ts");
 
 const HTTP_METHODS = ["GET", "POST", "PUT", "DELETE"];
 
@@ -80,7 +80,7 @@ function detectExportedMethods(filePath) {
 }
 
 // -------------------------------------------------------
-// ルート一覧からエントリファイル .generated/entry.ts を生成
+// ルート一覧からエントリファイル .rainjs/entry.ts を生成
 // -------------------------------------------------------
 function generate() {
   const dir = path.dirname(ENTRY_FILE);
@@ -129,7 +129,7 @@ function generate() {
   ].join("\n");
 
   fs.writeFileSync(ENTRY_FILE, content);
-  console.log(`[gen] ${files.length} route(s) → .generated/entry.ts`);
+  console.log(`[gen] ${files.length} route(s) → .rainjs/entry.ts`);
 }
 
 // -------------------------------------------------------

@@ -26,6 +26,6 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", ".generated/**/*.ts"],
+  "include": ["src/**/*.ts", ".rainjs/**/*.ts"],
   "exclude": ["node_modules", "scripts"]
 }
