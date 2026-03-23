@@ -21,7 +21,7 @@ function loadFramework() {
 }
 
 function createDummyHandler() {
-  return (_req, _params) => new Response("ok");
+  return (_ctx) => new Response("ok");
 }
 
 function generateRoutes(app, count) {

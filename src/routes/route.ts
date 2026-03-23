@@ -1,5 +1,5 @@
 import type { Handler } from "../framework";
 
-export const GET: Handler = (_req, _params) => {
-  return new Response("Hello, World!");
+export const GET: Handler = (ctx) => {
+  return ctx.text("Hello, World!");
 };

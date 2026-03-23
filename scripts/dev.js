@@ -26,6 +26,74 @@ function getRouteFiles(dir, base = "") {
   return files;
 }
 
+function getMiddlewareFiles(dir, base = "") {
+  if (!fs.existsSync(dir)) return [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  const files = [];
+
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    const relativePath = path.join(base, entry.name);
+
+    if (entry.isDirectory()) {
+      files.push(...getMiddlewareFiles(fullPath, relativePath));
+    } else if (entry.name === "_middleware.ts") {
+      files.push(relativePath);
+    }
+  }
+
+  return files;
+}
+
+function middlewarePathToDir(filePath) {
+  return filePath
+    .replace(/\\/g, "/")
+    .replace(/_middleware\.ts$/, "")
+    .replace(/\/$/, "");
+}
+
+function routePathToDir(filePath) {
+  return filePath
+    .replace(/\\/g, "/")
+    .replace(/route\.ts$/, "")
+    .replace(/\/$/, "");
+}
+
+function middlewareImportName(filePath) {
+  const base = filePath
+    .replace(/_middleware\.ts$/, "")
+    .replace(/\\/g, "_")
+    .replace(/\//g, "_")
+    .replace(/\[/g, "$")
+    .replace(/\]/g, "")
+    .replace(/-/g, "_");
+  return `mw_${base || "root"}`;
+}
+
+function getMiddlewaresForRoute(routeFile, middlewareFiles) {
+  const routeDir = routePathToDir(routeFile);
+  const applicable = [];
+
+  for (const mwFile of middlewareFiles) {
+    const mwDir = middlewarePathToDir(mwFile);
+    if (
+      mwDir === "" ||
+      routeDir === mwDir ||
+      routeDir.startsWith(`${mwDir}/`)
+    ) {
+      applicable.push(mwFile);
+    }
+  }
+
+  applicable.sort((a, b) => {
+    const depthA = a.split(/[\\/]/).length;
+    const depthB = b.split(/[\\/]/).length;
+    return depthA - depthB;
+  });
+
+  return applicable;
+}
+
 function filePathToUrlPath(filePath) {
   let urlPath = filePath.replace(/\.ts$/, "");
   urlPath = urlPath.replace(/\\/g, "/");
@@ -62,13 +130,38 @@ function detectExportedMethods(filePath) {
   return found;
 }
 
+function detectMiddlewareExport(filePath) {
+  const content = fs.readFileSync(filePath, "utf-8");
+  const pattern = /export\s+(?:const|function|async\s+function)\s+onRequest\b/;
+  return pattern.test(content);
+}
+
 function generate() {
   const dir = path.dirname(ENTRY_FILE);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
   const files = getRouteFiles(ROUTES_DIR);
+  const middlewareFiles = getMiddlewareFiles(ROUTES_DIR);
   const imports = [];
   const registrations = [];
+
+  const importedMiddlewares = new Set();
+  for (const mwFile of middlewareFiles) {
+    const fullMwPath = path.join(ROUTES_DIR, mwFile);
+    const relMwPath = `src/routes/${mwFile.replace(/\\/g, "/")}`;
+    if (!detectMiddlewareExport(fullMwPath)) {
+      console.error(
+        `[Rain] No "onRequest" export found in ${relMwPath}. ` +
+          'Middleware files must export "onRequest". Example:\n' +
+          "  export const onRequest: Middleware = async (ctx, next) => { ... }",
+      );
+      continue;
+    }
+    const name = middlewareImportName(mwFile);
+    const importPath = `../src/routes/${mwFile.replace(/\.ts$/, "").replace(/\\/g, "/")}`;
+    imports.push(`import { onRequest as ${name} } from "${importPath}";`);
+    importedMiddlewares.add(name);
+  }
 
   for (const file of files) {
     const importName = filePathToImportName(file);
@@ -81,7 +174,7 @@ function generate() {
       const relPath = `src/routes/${file.replace(/\\/g, "/")}`;
       console.error(
         `[Rain] No exported handlers found in ${relPath}. ` +
-          "Add an exported handler, e.g.: export const GET: Handler = (req, params) => { ... }",
+          "Add an exported handler, e.g.: export const GET: Handler = (ctx) => { ... }",
       );
       continue;
     }
@@ -91,10 +184,14 @@ function generate() {
       .join(", ");
     imports.push(`import { ${importSpecifiers} } from "${importPath}";`);
 
+    const applicableMw = getMiddlewaresForRoute(file, middlewareFiles);
+    const mwNames = applicableMw.map((mf) => middlewareImportName(mf));
+    const mwArrayStr = mwNames.length > 0 ? `, [${mwNames.join(", ")}]` : "";
+
     for (const method of methods) {
       const methodLower = method.toLowerCase();
       registrations.push(
-        `app.${methodLower}("${urlPath}", ${importName}_${method});`,
+        `app.${methodLower}("${urlPath}", ${importName}_${method}${mwArrayStr});`,
       );
     }
   }
