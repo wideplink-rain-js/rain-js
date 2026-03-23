@@ -14,4 +14,4 @@ export {
   renderToString,
 } from "./jsx";
 export { Rain } from "./router";
-export type { ErrorHandler, Handler, Middleware } from "./types";
+export type { ErrorHandler, Handler, Middleware, RainOptions } from "./types";

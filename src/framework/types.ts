@@ -1,5 +1,9 @@
 import type { Context } from "./context";
 
+export interface RainOptions {
+  csrfProtection?: boolean;
+}
+
 export type Handler = (ctx: Context) => Response | Promise<Response>;
 
 export type Middleware = (

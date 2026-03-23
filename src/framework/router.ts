@@ -1,6 +1,6 @@
 import { Context } from "./context";
 import { HttpError } from "./errors";
-import type { ErrorHandler, Handler, Middleware } from "./types";
+import type { ErrorHandler, Handler, Middleware, RainOptions } from "./types";
 import { escapeRegExp } from "./utils/regexp";
 import { safeDecodeURIComponent } from "./utils/url";
 
@@ -12,10 +12,24 @@ interface Route {
   middlewares: Middleware[];
 }
 
+const SECURITY_HEADERS: ReadonlyArray<readonly [string, string]> = [
+  ["X-Content-Type-Options", "nosniff"],
+  ["X-Frame-Options", "DENY"],
+  ["Referrer-Policy", "strict-origin-when-cross-origin"],
+  ["X-XSS-Protection", "0"],
+];
+
+const STATE_CHANGING_METHODS = new Set(["POST", "PUT", "DELETE"]);
+
 export class Rain {
   private routes: Route[] = [];
   private globalMiddlewares: Middleware[] = [];
   private errorHandler: ErrorHandler | undefined;
+  private csrfProtection: boolean;
+
+  constructor(options?: RainOptions) {
+    this.csrfProtection = options?.csrfProtection ?? true;
+  }
 
   use(...middlewares: Middleware[]): void {
     this.globalMiddlewares.push(...middlewares);
@@ -106,6 +120,14 @@ export class Rain {
   }
 
   async fetch(request: Request): Promise<Response> {
+    const response = await this.handleRequest(request);
+    return this.applySecurityHeaders(response);
+  }
+
+  private async handleRequest(request: Request): Promise<Response> {
+    const csrfResponse = this.validateCsrf(request);
+    if (csrfResponse) return csrfResponse;
+
     const { pathname } = new URL(request.url);
     const method = request.method;
 
@@ -153,13 +175,84 @@ export class Rain {
       }
 
       if (pathMatched) {
-        return new Response("Method Not Allowed", { status: 405 });
+        return new Response("Method Not Allowed", {
+          status: 405,
+        });
       }
 
       return new Response("Not Found", { status: 404 });
     } catch (error) {
       return this.handleError(error, request, pathname);
     }
+  }
+
+  private applySecurityHeaders(response: Response): Response {
+    const headers = new Headers(response.headers);
+    let modified = false;
+    for (const [name, value] of SECURITY_HEADERS) {
+      if (!headers.has(name)) {
+        headers.set(name, value);
+        modified = true;
+      }
+    }
+    if (!modified) return response;
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  }
+
+  private validateCsrf(request: Request): Response | null {
+    if (!this.csrfProtection) return null;
+    if (!STATE_CHANGING_METHODS.has(request.method)) {
+      return null;
+    }
+
+    const requestOrigin = new URL(request.url).origin;
+    const origin = request.headers.get("Origin");
+
+    if (origin) {
+      if (origin !== requestOrigin) {
+        return this.csrfForbiddenResponse(origin, requestOrigin);
+      }
+      return null;
+    }
+
+    const referer = request.headers.get("Referer");
+    if (referer) {
+      const refererOrigin = this.extractOrigin(referer);
+      if (refererOrigin && refererOrigin !== requestOrigin) {
+        return this.csrfForbiddenResponse(refererOrigin, requestOrigin);
+      }
+    }
+
+    return null;
+  }
+
+  private extractOrigin(url: string): string | null {
+    try {
+      return new URL(url).origin;
+    } catch {
+      return null;
+    }
+  }
+
+  private csrfForbiddenResponse(received: string, expected: string): Response {
+    const message =
+      "[Rain] CSRF validation failed: " +
+      `Origin '${received}' does not match ` +
+      `request origin '${expected}'. ` +
+      "If this is a legitimate cross-origin " +
+      "request, configure CORS or disable " +
+      "CSRF protection: " +
+      "new Rain({ csrfProtection: false })";
+    return new Response(message, {
+      status: 403,
+      headers: {
+        "content-type": "text/plain; charset=UTF-8",
+      },
+    });
   }
 
   private async handleError(
