@@ -18,7 +18,7 @@ function getRouteFiles(dir, base = "") {
 
     if (entry.isDirectory()) {
       files.push(...getRouteFiles(fullPath, relativePath));
-    } else if (entry.name === "index.ts" || /^\[.+\]\.ts$/.test(entry.name)) {
+    } else if (entry.name === "route.ts") {
       files.push(relativePath);
     }
   }
@@ -30,8 +30,8 @@ function filePathToUrlPath(filePath) {
   let urlPath = filePath.replace(/\.ts$/, "");
   urlPath = urlPath.replace(/\\/g, "/");
   urlPath = urlPath.replace(/\[([^\]]+)\]/g, ":$1");
-  urlPath = urlPath.replace(/\/index$/, "");
-  if (urlPath === "index") urlPath = "";
+  urlPath = urlPath.replace(/\/route$/, "");
+  if (urlPath === "route") urlPath = "";
   return `/${urlPath}`;
 }
 
@@ -105,7 +105,7 @@ function generate() {
   ].join("\n");
 
   fs.writeFileSync(ENTRY_FILE, content);
-  console.log(`[gen] ${files.length} route(s) → .rainjs/entry.ts`);
+  console.log(`[gen] ${files.length} route(s) -> .rainjs/entry.ts`);
 }
 
 generate();
