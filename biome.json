@@ -1,0 +1,97 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.8/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": false,
+    "includes": ["src/**", "scripts/**", ".generated/**"]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 80
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+
+      "complexity": {
+        "noExcessiveCognitiveComplexity": "error",
+        "noVoid": "error",
+        "useLiteralKeys": "off",
+        "useSimplifiedLogicExpression": "warn"
+      },
+
+      "correctness": {
+        "noUndeclaredVariables": "error",
+        "noUnusedFunctionParameters": "error",
+        "noUnusedImports": "error",
+        "noUnusedVariables": "error"
+      },
+
+      "performance": {
+        "noBarrelFile": "warn",
+        "noReExportAll": "warn"
+      },
+
+      "style": {
+        "noDefaultExport": "off",
+        "noNamespace": "error",
+        "noNegationElse": "warn",
+        "noParameterAssign": "error",
+        "useCollapsedElseIf": "warn",
+        "useConsistentBuiltinInstantiation": "error",
+        "useExplicitLengthCheck": "warn",
+        "useForOf": "warn",
+        "useThrowNewError": "error"
+      },
+
+      "suspicious": {
+        "noConsole": "warn",
+        "noEmptyBlockStatements": "error",
+        "noEvolvingTypes": "error",
+        "useAwait": "error"
+      },
+
+      "nursery": {
+        "noFloatingPromises": "error",
+        "noShadow": "warn",
+        "useImportsFirst": "error",
+        "useSortedClasses": "warn"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "all",
+      "arrowParentheses": "always"
+    }
+  },
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["scripts/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
+          }
+        }
+      }
+    }
+  ]
+}
