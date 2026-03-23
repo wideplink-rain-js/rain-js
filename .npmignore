@@ -1,0 +1,8 @@
+scripts/bench.js
+benchmarks/
+.rainjs/
+.github/
+docs/
+biome.json
+tsconfig.json
+wrangler.toml
