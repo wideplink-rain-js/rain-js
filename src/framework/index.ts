@@ -18,7 +18,9 @@ export { Rain } from "./router";
 export type {
   ErrorHandler,
   Handler,
+  LayoutHandler,
   Middleware,
+  PageHandler,
   RainConfig,
   RainOptions,
 } from "./types";

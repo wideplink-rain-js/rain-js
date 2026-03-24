@@ -8,6 +8,12 @@ const {
   getMiddlewaresForRoute,
   detectExportedMethodsFromContent,
   detectMiddlewareExportFromContent,
+  pageFilePathToUrlPath,
+  pageFilePathToImportName,
+  layoutImportName,
+  getLayoutsForPage,
+  detectDefaultExportFromContent,
+  validateNoPageRouteColocation,
 } = require("../scripts/generate");
 
 describe("filePathToUrlPath", () => {
@@ -82,13 +88,13 @@ describe("middlewareImportName", () => {
   });
 
   it("nested middleware", () => {
-    assert.strictEqual(middlewareImportName("user/_middleware.ts"), "mw_user_");
+    assert.strictEqual(middlewareImportName("user/_middleware.ts"), "mw_user");
   });
 
   it("deep nested middleware", () => {
     assert.strictEqual(
       middlewareImportName("api/v1/_middleware.ts"),
-      "mw_api_v1_",
+      "mw_api_v1",
     );
   });
 });
@@ -106,8 +112,8 @@ describe("getMiddlewaresForRoute", () => {
 
   it("returns middlewares in depth order (parent first)", () => {
     const result = getMiddlewaresForRoute("user/[id]/route.ts", [
-      "user/_middleware.ts",
       "_middleware.ts",
+      "user/_middleware.ts",
     ]);
     assert.deepStrictEqual(result, ["_middleware.ts", "user/_middleware.ts"]);
   });
@@ -126,9 +132,9 @@ describe("getMiddlewaresForRoute", () => {
 
   it("returns multiple levels in order", () => {
     const result = getMiddlewaresForRoute("api/v1/users/route.ts", [
-      "api/v1/_middleware.ts",
       "_middleware.ts",
       "api/_middleware.ts",
+      "api/v1/_middleware.ts",
     ]);
     assert.deepStrictEqual(result, [
       "_middleware.ts",
@@ -271,5 +277,168 @@ describe("detectMiddlewareExportFromContent", () => {
 
   it("returns false for empty content", () => {
     assert.strictEqual(detectMiddlewareExportFromContent(""), false);
+  });
+});
+
+describe("pageFilePathToUrlPath", () => {
+  it("root page", () => {
+    assert.strictEqual(pageFilePathToUrlPath("page.tsx"), "/");
+  });
+
+  it("simple path", () => {
+    assert.strictEqual(pageFilePathToUrlPath("hello/page.tsx"), "/hello");
+  });
+
+  it("dynamic segment", () => {
+    assert.strictEqual(
+      pageFilePathToUrlPath("user/[id]/page.tsx"),
+      "/user/:id",
+    );
+  });
+
+  it("nested path", () => {
+    assert.strictEqual(
+      pageFilePathToUrlPath("admin/settings/page.tsx"),
+      "/admin/settings",
+    );
+  });
+
+  it("ts extension", () => {
+    assert.strictEqual(pageFilePathToUrlPath("hello/page.ts"), "/hello");
+  });
+});
+
+describe("pageFilePathToImportName", () => {
+  it("root page", () => {
+    assert.strictEqual(pageFilePathToImportName("page.tsx"), "page_page");
+  });
+
+  it("nested page", () => {
+    assert.strictEqual(
+      pageFilePathToImportName("hello/page.tsx"),
+      "page_hello_page",
+    );
+  });
+
+  it("dynamic segment", () => {
+    assert.strictEqual(
+      pageFilePathToImportName("user/[id]/page.tsx"),
+      "page_user_$id_page",
+    );
+  });
+});
+
+describe("layoutImportName", () => {
+  it("root layout", () => {
+    assert.strictEqual(layoutImportName("layout.tsx"), "layout_root");
+  });
+
+  it("nested layout", () => {
+    assert.strictEqual(layoutImportName("admin/layout.tsx"), "layout_admin");
+  });
+
+  it("deep nested layout", () => {
+    assert.strictEqual(
+      layoutImportName("admin/settings/layout.tsx"),
+      "layout_admin_settings",
+    );
+  });
+});
+
+describe("getLayoutsForPage", () => {
+  it("returns root layout for all pages", () => {
+    const result = getLayoutsForPage("hello/page.tsx", ["layout.tsx"]);
+    assert.deepStrictEqual(result, ["layout.tsx"]);
+  });
+
+  it("returns empty for no layouts", () => {
+    const result = getLayoutsForPage("hello/page.tsx", []);
+    assert.deepStrictEqual(result, []);
+  });
+
+  it("returns layouts in depth order (parent first)", () => {
+    const result = getLayoutsForPage("admin/settings/page.tsx", [
+      "layout.tsx",
+      "admin/layout.tsx",
+    ]);
+    assert.deepStrictEqual(result, ["layout.tsx", "admin/layout.tsx"]);
+  });
+
+  it("does not return unrelated layout", () => {
+    const result = getLayoutsForPage("hello/page.tsx", ["admin/layout.tsx"]);
+    assert.deepStrictEqual(result, []);
+  });
+
+  it("returns root layout for root page", () => {
+    const result = getLayoutsForPage("page.tsx", ["layout.tsx"]);
+    assert.deepStrictEqual(result, ["layout.tsx"]);
+  });
+});
+
+describe("detectDefaultExportFromContent", () => {
+  it("detects export default function", () => {
+    const content = "export default function Page() { return null; }";
+    assert.strictEqual(detectDefaultExportFromContent(content), true);
+  });
+
+  it("detects export default assignment", () => {
+    const content = "const Page = () => null;\nexport default Page;";
+    assert.strictEqual(detectDefaultExportFromContent(content), true);
+  });
+
+  it("detects export default class", () => {
+    const content = "export default class Page {}";
+    assert.strictEqual(detectDefaultExportFromContent(content), true);
+  });
+
+  it("returns false for named exports only", () => {
+    const content = "export const GET = () => {};";
+    assert.strictEqual(detectDefaultExportFromContent(content), false);
+  });
+
+  it("returns false for empty content", () => {
+    assert.strictEqual(detectDefaultExportFromContent(""), false);
+  });
+
+  it("detects export default arrow function", () => {
+    const content = "export default () => null";
+    assert.strictEqual(detectDefaultExportFromContent(content), true);
+  });
+
+  it("detects export default arrow function with params", () => {
+    const content = "export default (ctx) => ctx.params";
+    assert.strictEqual(detectDefaultExportFromContent(content), true);
+  });
+});
+
+describe("validateNoPageRouteColocation", () => {
+  it("returns empty for no conflicts", () => {
+    const errors = validateNoPageRouteColocation(
+      ["user/route.ts"],
+      ["hello/page.tsx"],
+    );
+    assert.deepStrictEqual(errors, []);
+  });
+
+  it("returns error for same directory", () => {
+    const errors = validateNoPageRouteColocation(
+      ["hello/route.ts"],
+      ["hello/page.tsx"],
+    );
+    assert.strictEqual(errors.length, 1);
+    assert.ok(errors[0].includes("cannot coexist"));
+  });
+
+  it("returns error for root directory conflict", () => {
+    const errors = validateNoPageRouteColocation(["route.ts"], ["page.tsx"]);
+    assert.strictEqual(errors.length, 1);
+  });
+
+  it("allows different directories", () => {
+    const errors = validateNoPageRouteColocation(
+      ["api/route.ts", "user/route.ts"],
+      ["hello/page.tsx", "about/page.tsx"],
+    );
+    assert.deepStrictEqual(errors, []);
   });
 });

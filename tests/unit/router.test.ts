@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Handler } from "../../src/framework";
-import { HttpError } from "../../src/framework";
+import type { Handler, LayoutHandler, PageHandler } from "../../src/framework";
+import { createElement, HttpError } from "../../src/framework";
 import { createApp, request } from "../helpers/app";
 
 const ok: Handler = (ctx) => ctx.text("ok");
@@ -162,6 +162,164 @@ describe("Rain Router", () => {
       });
       const res = await request(app, "/error");
       expect(res.status).toBe(500);
+    });
+  });
+
+  describe("page rendering", () => {
+    const simplePage: PageHandler = () =>
+      createElement("h1", null, "Hello Page");
+
+    it("renders a page as HTML", async () => {
+      const app = createApp({ csrf: false });
+      app.page("/hello", simplePage);
+      const res = await request(app, "/hello");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("text/html; charset=UTF-8");
+      expect(await res.text()).toBe("<h1>Hello Page</h1>");
+    });
+
+    it("applies layout to page", async () => {
+      const app = createApp({ csrf: false });
+      const layout: LayoutHandler = (_ctx, children) =>
+        createElement("html", null, createElement("body", null, children));
+      app.page("/hello", simplePage, [layout]);
+      const res = await request(app, "/hello");
+      const html = await res.text();
+      expect(html).toBe("<html><body><h1>Hello Page</h1></body></html>");
+    });
+
+    it("applies nested layouts parent-to-child", async () => {
+      const app = createApp({ csrf: false });
+      const rootLayout: LayoutHandler = (_ctx, children) =>
+        createElement("html", null, children);
+      const innerLayout: LayoutHandler = (_ctx, children) =>
+        createElement("main", null, children);
+      app.page("/hello", simplePage, [rootLayout, innerLayout]);
+      const res = await request(app, "/hello");
+      const html = await res.text();
+      expect(html).toBe("<html><main><h1>Hello Page</h1></main></html>");
+    });
+
+    it("prepends DOCTYPE when doctype flag is true", async () => {
+      const app = createApp({ csrf: false });
+      const layout: LayoutHandler = (_ctx, children) =>
+        createElement("html", null, children);
+      app.page("/hello", simplePage, [layout], [], true);
+      const res = await request(app, "/hello");
+      const html = await res.text();
+      expect(html).toMatch(/^<!DOCTYPE html>\n<html>/);
+    });
+
+    it("does not prepend DOCTYPE when flag is false", async () => {
+      const app = createApp({ csrf: false });
+      app.page("/hello", simplePage, [], [], false);
+      const res = await request(app, "/hello");
+      const html = await res.text();
+      expect(html).not.toContain("<!DOCTYPE");
+    });
+
+    it("registers page as GET method", async () => {
+      const app = createApp({ csrf: false });
+      app.page("/hello", simplePage);
+      const res = await request(app, "/hello", { method: "POST" });
+      expect(res.status).toBe(405);
+    });
+
+    it("applies middleware to page", async () => {
+      const app = createApp({ csrf: false });
+      let middlewareRan = false;
+      app.page(
+        "/hello",
+        simplePage,
+        [],
+        [
+          async (_ctx, next) => {
+            middlewareRan = true;
+            return await next();
+          },
+        ],
+      );
+      await request(app, "/hello");
+      expect(middlewareRan).toBe(true);
+    });
+
+    it("supports dynamic params in pages", async () => {
+      const app = createApp({ csrf: false });
+      const userPage: PageHandler = (ctx) =>
+        createElement("h1", null, `User ${ctx.params["id"]}`);
+      app.page("/user/:id", userPage);
+      const res = await request(app, "/user/42");
+      expect(await res.text()).toBe("<h1>User 42</h1>");
+    });
+
+    it("supports async page handlers", async () => {
+      const app = createApp({ csrf: false });
+      const asyncPage: PageHandler = async () =>
+        createElement("h1", null, "Async");
+      app.page("/async", asyncPage);
+      const res = await request(app, "/async");
+      expect(await res.text()).toBe("<h1>Async</h1>");
+    });
+
+    it("supports async layout handlers", async () => {
+      const app = createApp({ csrf: false });
+      const asyncLayout: LayoutHandler = async (_ctx, children) =>
+        createElement("div", null, children);
+      app.page("/hello", simplePage, [asyncLayout]);
+      const res = await request(app, "/hello");
+      expect(await res.text()).toBe("<div><h1>Hello Page</h1></div>");
+    });
+
+    it("reports layout depth on layout error", async () => {
+      const app = createApp({ csrf: false });
+      const goodLayout: LayoutHandler = (_ctx, children) =>
+        createElement("html", null, children);
+      const badLayout: LayoutHandler = () => {
+        throw new Error("broken layout");
+      };
+      app.page("/hello", simplePage, [goodLayout, badLayout]);
+      const res = await request(app, "/hello");
+      expect(res.status).toBe(500);
+    });
+
+    it("includes depth info in layout error message", async () => {
+      const app = createApp({ csrf: false });
+      const badLayout: LayoutHandler = () => {
+        throw new Error("broken");
+      };
+      const errors: unknown[] = [];
+      app.onError((error) => {
+        errors.push(error);
+        return new Response("error", { status: 500 });
+      });
+      app.page("/hello", simplePage, [badLayout]);
+      await request(app, "/hello");
+      expect(errors).toHaveLength(1);
+      const err = errors[0] as Error;
+      expect(err.message).toContain("Layout error at depth 1/1");
+      expect(err.message).toContain("/hello");
+      expect(err.cause).toBeInstanceOf(Error);
+      expect((err.cause as Error).message).toBe("broken");
+    });
+
+    it("identifies correct depth in nested layout error", async () => {
+      const app = createApp({ csrf: false });
+      const outerLayout: LayoutHandler = (_ctx, children) =>
+        createElement("html", null, children);
+      const innerLayout: LayoutHandler = () => {
+        throw new Error("inner broken");
+      };
+      const errors: unknown[] = [];
+      app.onError((error) => {
+        errors.push(error);
+        return new Response("error", { status: 500 });
+      });
+      app.page("/hello", simplePage, [outerLayout, innerLayout]);
+      await request(app, "/hello");
+      expect(errors).toHaveLength(1);
+      const err = errors[0] as Error;
+      expect(err.message).toContain("Layout error at depth 1/2");
+      expect((err.cause as Error).message).toBe("inner broken");
     });
   });
 });

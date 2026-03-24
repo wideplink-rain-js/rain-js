@@ -1,10 +1,14 @@
 import { runWithBindings } from "./bindings";
 import { Context } from "./context";
 import { HttpError } from "./errors";
+import { renderToString } from "./jsx";
+import type { RainElement } from "./jsx/types";
 import type {
   ErrorHandler,
   Handler,
+  LayoutHandler,
   Middleware,
+  PageHandler,
   RainConfig,
   RainOptions,
 } from "./types";
@@ -132,6 +136,39 @@ export class Rain {
 
   options(path: string, handler: Handler, middlewares?: Middleware[]): void {
     this.addRoute("OPTIONS", path, handler, middlewares);
+  }
+
+  page(
+    path: string,
+    handler: PageHandler,
+    layouts: LayoutHandler[] = [],
+    middlewares: Middleware[] = [],
+    doctype = false,
+  ): void {
+    const wrappedHandler: Handler = async (ctx: Context) => {
+      let content: RainElement = await handler(ctx);
+      for (let i = layouts.length - 1; i >= 0; i--) {
+        try {
+          content = await (layouts[i] as LayoutHandler)(ctx, content);
+        } catch (cause) {
+          const depth = layouts.length - i;
+          const total = layouts.length;
+          throw new Error(
+            `[Rain] Layout error at depth ${depth}/${total}` +
+              ` while rendering page '${path}'.` +
+              " Check your layout.tsx files for this route.",
+            { cause },
+          );
+        }
+      }
+      const html = renderToString(content);
+      const body = doctype ? `<!DOCTYPE html>\n${html}` : html;
+      return new Response(body, {
+        status: 200,
+        headers: { "content-type": "text/html; charset=UTF-8" },
+      });
+    };
+    this.addRoute("GET", path, wrappedHandler, middlewares);
   }
 
   private composeMiddlewares(

@@ -5,6 +5,7 @@ const {
   generate,
   detectExportedMethodsFromContent,
   detectMiddlewareExportFromContent,
+  detectDefaultExportFromContent,
 } = require("./generate");
 
 const FRAMEWORK_PATH = path.join(
@@ -109,6 +110,56 @@ function benchNotFound(RainClass, routeCount) {
     `404 ミス (${routeCount} ルート)`,
     async () => await app.fetch(req),
   );
+}
+
+function createDummyPageHandler(createElement) {
+  return (_ctx) =>
+    createElement(
+      "div",
+      { className: "page" },
+      createElement("h1", null, "Hello"),
+      createElement("p", null, "content"),
+    );
+}
+
+function createDummyLayout(createElement, name) {
+  return (_ctx, children) =>
+    createElement(
+      "div",
+      { className: `layout-${name}` },
+      createElement("header", null, name),
+      children,
+    );
+}
+
+function benchPageRegistration(RainClass, createElement, count) {
+  return bench(
+    `${count} ページ登録`,
+    () => {
+      const app = new RainClass();
+      const handler = createDummyPageHandler(createElement);
+      const layout = createDummyLayout(createElement, "root");
+      for (let i = 0; i < count; i++) {
+        app.page(`/page${i}`, handler, [layout]);
+      }
+    },
+    1000,
+  );
+}
+
+function benchPageRendering(RainClass, createElement, layoutCount) {
+  const app = new RainClass();
+  const handler = createDummyPageHandler(createElement);
+  const layouts = Array.from({ length: layoutCount }, (_, i) =>
+    createDummyLayout(createElement, `L${i}`),
+  );
+  app.page("/bench-page", handler, layouts, [], layoutCount > 0);
+  const req = createRequest("/bench-page");
+  const label =
+    layoutCount === 0
+      ? "ページレンダリング (レイアウトなし)"
+      : `ページレンダリング (${layoutCount}レイアウト)`;
+  return bench(label, async () => await app.fetch(req));
 }
 
 function benchCreateElement(createElement, Fragment) {
@@ -251,6 +302,29 @@ function benchDetectExportedMethods() {
   };
 }
 
+function benchDetectDefaultExport() {
+  const exportDefault =
+    "const Page = (ctx) => <h1>Hello</h1>;\nexport default Page;";
+  const exportDefaultFunction =
+    "export default function Page(ctx) { return <h1>Hello</h1>; }";
+  const noDefault = 'export const GET: Handler = (ctx) => new Response("ok");';
+
+  return {
+    assignment: () =>
+      bench("AST default export 検出 (代入)", () =>
+        detectDefaultExportFromContent(exportDefault),
+      ),
+    functionDecl: () =>
+      bench("AST default export 検出 (関数)", () =>
+        detectDefaultExportFromContent(exportDefaultFunction),
+      ),
+    absent: () =>
+      bench("AST default export 検出 (なし)", () =>
+        detectDefaultExportFromContent(noDefault),
+      ),
+  };
+}
+
 function benchDetectMiddlewareExport() {
   const content =
     "export const onRequest: Middleware = " +
@@ -375,6 +449,22 @@ async function main() {
   ];
   printTable(dynResults);
 
+  console.log("\n## ページ登録\n");
+  const pageRegResults = [
+    await benchPageRegistration(Rain, createElement, 10),
+    await benchPageRegistration(Rain, createElement, 50),
+    await benchPageRegistration(Rain, createElement, 100),
+  ];
+  printTable(pageRegResults);
+
+  console.log("\n## ページレンダリング (レイアウト数別)\n");
+  const pageRenderResults = [
+    await benchPageRendering(Rain, createElement, 0),
+    await benchPageRendering(Rain, createElement, 1),
+    await benchPageRendering(Rain, createElement, 3),
+  ];
+  printTable(pageRenderResults);
+
   console.log("\n## 404 該当なし (全ルート走査)\n");
   const notFoundResults = [
     await benchNotFound(Rain, 10),
@@ -422,11 +512,15 @@ async function main() {
   console.log("\n## TypeScript AST パース\n");
   const astMethodBenches = benchDetectExportedMethods();
   const astMwBench = benchDetectMiddlewareExport();
+  const astDefaultBenches = benchDetectDefaultExport();
   const astResults = [
     await astMethodBenches.simple(),
     await astMethodBenches.multi(),
     await astMethodBenches.reExport(),
     await astMwBench(),
+    await astDefaultBenches.assignment(),
+    await astDefaultBenches.functionDecl(),
+    await astDefaultBenches.absent(),
   ];
   printTable(astResults);
 

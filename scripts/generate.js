@@ -113,6 +113,44 @@ function getMiddlewareFiles(dir, base = "") {
   return files;
 }
 
+function getPageFiles(dir, base = "") {
+  if (!fs.existsSync(dir)) return [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  const files = [];
+
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    const relativePath = path.join(base, entry.name);
+
+    if (entry.isDirectory()) {
+      files.push(...getPageFiles(fullPath, relativePath));
+    } else if (entry.name === "page.ts" || entry.name === "page.tsx") {
+      files.push(relativePath);
+    }
+  }
+
+  return files;
+}
+
+function getLayoutFiles(dir, base = "") {
+  if (!fs.existsSync(dir)) return [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  const files = [];
+
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    const relativePath = path.join(base, entry.name);
+
+    if (entry.isDirectory()) {
+      files.push(...getLayoutFiles(fullPath, relativePath));
+    } else if (entry.name === "layout.ts" || entry.name === "layout.tsx") {
+      files.push(relativePath);
+    }
+  }
+
+  return files;
+}
+
 function middlewarePathToDir(filePath) {
   return filePath
     .replace(/\\/g, "/")
@@ -134,12 +172,131 @@ function middlewareImportName(filePath) {
     .replace(/\//g, "_")
     .replace(/\[/g, "$")
     .replace(/\]/g, "")
-    .replace(/-/g, "_");
+    .replace(/-/g, "_")
+    .replace(/_+$/, "");
   return `mw_${base || "root"}`;
 }
 
+function pageFilePathToDir(filePath) {
+  return filePath
+    .replace(/\\/g, "/")
+    .replace(/page\.tsx?$/, "")
+    .replace(/\/$/, "");
+}
+
+function layoutPathToDir(filePath) {
+  return filePath
+    .replace(/\\/g, "/")
+    .replace(/layout\.tsx?$/, "")
+    .replace(/\/$/, "");
+}
+
+function pageFilePathToUrlPath(filePath) {
+  let urlPath = filePath.replace(/\.tsx?$/, "");
+  urlPath = urlPath.replace(/\\/g, "/");
+  urlPath = urlPath.replace(/\[([^\]]+)\]/g, ":$1");
+  urlPath = urlPath.replace(/\/page$/, "");
+  if (urlPath === "page") urlPath = "";
+  return `/${urlPath}`;
+}
+
+function pageFilePathToImportName(filePath) {
+  return (
+    "page_" +
+    filePath
+      .replace(/\.tsx?$/, "")
+      .replace(/\\/g, "_")
+      .replace(/\//g, "_")
+      .replace(/\[/g, "$")
+      .replace(/\]/g, "")
+      .replace(/-/g, "_")
+  );
+}
+
+function layoutImportName(filePath) {
+  const base = filePath
+    .replace(/layout\.tsx?$/, "")
+    .replace(/\\/g, "_")
+    .replace(/\//g, "_")
+    .replace(/\[/g, "$")
+    .replace(/\]/g, "")
+    .replace(/-/g, "_")
+    .replace(/_+$/, "");
+  return `layout_${base || "root"}`;
+}
+
+function getLayoutsForPage(pageFile, layoutFiles) {
+  const pageDir = pageFilePathToDir(pageFile);
+  const applicable = [];
+
+  for (const lf of layoutFiles) {
+    const lfDir = layoutPathToDir(lf);
+    if (lfDir === "" || pageDir === lfDir || pageDir.startsWith(`${lfDir}/`)) {
+      applicable.push(lf);
+    }
+  }
+
+  return applicable;
+}
+
+function detectDefaultExportFromContent(content) {
+  const sourceFile = ts.createSourceFile(
+    "page.tsx",
+    content,
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  let found = false;
+
+  ts.forEachChild(sourceFile, (node) => {
+    if (ts.isExportAssignment(node) && !node.isExportEquals) {
+      found = true;
+    }
+    if (
+      (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) &&
+      hasExportKeyword(node)
+    ) {
+      const modifiers = ts.canHaveModifiers(node)
+        ? ts.getModifiers(node)
+        : undefined;
+      if (modifiers?.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword)) {
+        found = true;
+      }
+    }
+  });
+
+  return found;
+}
+
+function detectDefaultExport(filePath) {
+  const content = fs.readFileSync(filePath, "utf-8");
+  return detectDefaultExportFromContent(content);
+}
+
+function validateNoPageRouteColocation(routeFiles, pageFiles) {
+  const routeDirs = new Set(routeFiles.map((f) => routePathToDir(f)));
+  const errors = [];
+
+  for (const pageFile of pageFiles) {
+    const pageDir = pageFilePathToDir(pageFile);
+    if (routeDirs.has(pageDir)) {
+      const relDir = pageDir || "(root)";
+      errors.push(
+        `[Rain] Error: page and route files cannot coexist in the same directory: ${relDir}\n` +
+          "  → Use page.tsx for pages (returns JSX) or route.ts for API endpoints (returns Response), not both.\n" +
+          "  → Move one of them to a different directory.",
+      );
+    }
+  }
+
+  return errors;
+}
+
 function getMiddlewaresForRoute(routeFile, middlewareFiles) {
-  const routeDir = routePathToDir(routeFile);
+  const isPage = /page\.tsx?$/.test(routeFile);
+  const routeDir = isPage
+    ? pageFilePathToDir(routeFile)
+    : routePathToDir(routeFile);
   const applicable = [];
 
   for (const mwFile of middlewareFiles) {
@@ -152,12 +309,6 @@ function getMiddlewaresForRoute(routeFile, middlewareFiles) {
       applicable.push(mwFile);
     }
   }
-
-  applicable.sort((a, b) => {
-    const depthA = a.split(/[\\/]/).length;
-    const depthB = b.split(/[\\/]/).length;
-    return depthA - depthB;
-  });
 
   return applicable;
 }
@@ -262,39 +413,7 @@ function detectMiddlewareExport(filePath) {
   return detectMiddlewareExportFromContent(content);
 }
 
-function generate() {
-  if (!fs.existsSync(ROUTES_DIR)) {
-    console.error(
-      "[Rain] Error: src/routes/ directory not found.\n" +
-        `  → Current directory: ${PROJECT_ROOT}\n` +
-        "  → Ensure you are running this command from a Rain.js project root.\n" +
-        "  → Or create the directory: mkdir -p src/routes",
-    );
-    process.exit(1);
-  }
-
-  try {
-    execSync("npx wrangler types", {
-      cwd: PROJECT_ROOT,
-      stdio: "pipe",
-      timeout: 30_000,
-    });
-  } catch (_wranglerTypesOptional) {
-    console.warn(
-      "[Rain] Warning: wrangler types failed.\n" +
-        '  → This is optional but recommended. Run "npx wrangler types" manually to debug.',
-    );
-  }
-
-  const dir = path.dirname(ENTRY_FILE);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-
-  const files = getRouteFiles(ROUTES_DIR);
-  const middlewareFiles = getMiddlewareFiles(ROUTES_DIR);
-  const imports = [];
-  const registrations = [];
-
-  const importedMiddlewares = new Set();
+function processMiddlewares(middlewareFiles, imports) {
   for (const mwFile of middlewareFiles) {
     const fullMwPath = path.join(ROUTES_DIR, mwFile);
     const relMwPath = `${BUILD_CONFIG.routesDir}/${mwFile.replace(/\\/g, "/")}`;
@@ -311,9 +430,10 @@ function generate() {
       path.join(ROUTES_DIR, mwFile.replace(/\.tsx?$/, "")),
     );
     imports.push(`import { onRequest as ${name} } from "${importPath}";`);
-    importedMiddlewares.add(name);
   }
+}
 
+function processRoutes(files, middlewareFiles, imports, registrations) {
   for (const file of files) {
     const importName = filePathToImportName(file);
     const urlPath = filePathToUrlPath(file);
@@ -348,6 +468,129 @@ function generate() {
       );
     }
   }
+}
+
+function processLayouts(layoutFiles, imports) {
+  for (const lf of layoutFiles) {
+    const fullLfPath = path.join(ROUTES_DIR, lf);
+    const relLfPath = `${BUILD_CONFIG.routesDir}/${lf.replace(/\\/g, "/")}`;
+    if (!detectDefaultExport(fullLfPath)) {
+      console.error(
+        `[Rain] No default export found in ${relLfPath}. ` +
+          "Layout files must use default export. Example:\n" +
+          "  export default function RootLayout(ctx, children) { ... }",
+      );
+      continue;
+    }
+    const name = layoutImportName(lf);
+    const importPath = relativeImportPath(
+      path.join(ROUTES_DIR, lf.replace(/\.tsx?$/, "")),
+    );
+    imports.push(`import ${name} from "${importPath}";`);
+  }
+}
+
+function processPages(
+  pageFiles,
+  layoutFiles,
+  middlewareFiles,
+  hasRootLayout,
+  imports,
+  registrations,
+) {
+  for (const pageFile of pageFiles) {
+    const fullPagePath = path.join(ROUTES_DIR, pageFile);
+    const relPagePath = `${BUILD_CONFIG.routesDir}/${pageFile.replace(/\\/g, "/")}`;
+    if (!detectDefaultExport(fullPagePath)) {
+      console.error(
+        `[Rain] No default export found in ${relPagePath}. ` +
+          "Page files must use default export. Example:\n" +
+          "  export default function Page(ctx) { return <h1>Hello</h1>; }",
+      );
+      continue;
+    }
+    const importName = pageFilePathToImportName(pageFile);
+    const urlPath = pageFilePathToUrlPath(pageFile);
+    const importPath = relativeImportPath(
+      path.join(ROUTES_DIR, pageFile.replace(/\.tsx?$/, "")),
+    );
+    imports.push(`import ${importName} from "${importPath}";`);
+
+    const applicableLayouts = getLayoutsForPage(pageFile, layoutFiles);
+    const layoutNames = applicableLayouts.map((f) => layoutImportName(f));
+    const layoutArrayStr =
+      layoutNames.length > 0 ? `[${layoutNames.join(", ")}]` : "[]";
+
+    const applicableMw = getMiddlewaresForRoute(pageFile, middlewareFiles);
+    const mwNames = applicableMw.map((mf) => middlewareImportName(mf));
+    const mwArrayStr = mwNames.length > 0 ? `[${mwNames.join(", ")}]` : "[]";
+
+    const doctype = hasRootLayout ? "true" : "false";
+
+    registrations.push(
+      `app.page("${urlPath}", ${importName}, ${layoutArrayStr}, ${mwArrayStr}, ${doctype});`,
+    );
+  }
+}
+
+function generate() {
+  if (!fs.existsSync(ROUTES_DIR)) {
+    console.error(
+      "[Rain] Error: src/routes/ directory not found.\n" +
+        `  → Current directory: ${PROJECT_ROOT}\n` +
+        "  → Ensure you are running this command from a Rain.js project root.\n" +
+        "  → Or create the directory: mkdir -p src/routes",
+    );
+    process.exit(1);
+  }
+
+  try {
+    execSync("npx wrangler types", {
+      cwd: PROJECT_ROOT,
+      stdio: "pipe",
+      timeout: 30_000,
+    });
+  } catch (_wranglerTypesOptional) {
+    console.warn(
+      "[Rain] Warning: wrangler types failed.\n" +
+        '  → This is optional but recommended. Run "npx wrangler types" manually to debug.',
+    );
+  }
+
+  const dir = path.dirname(ENTRY_FILE);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+  const files = getRouteFiles(ROUTES_DIR);
+  const middlewareFiles = getMiddlewareFiles(ROUTES_DIR);
+  const pageFiles = getPageFiles(ROUTES_DIR);
+  const layoutFiles = getLayoutFiles(ROUTES_DIR);
+
+  const depthSortComparator = (a, b) =>
+    a.split(/[\\/]/).length - b.split(/[\\/]/).length;
+  layoutFiles.sort(depthSortComparator);
+  middlewareFiles.sort(depthSortComparator);
+  const imports = [];
+  const registrations = [];
+
+  const colocationErrors = validateNoPageRouteColocation(files, pageFiles);
+  for (const err of colocationErrors) {
+    console.error(err);
+    process.exit(1);
+  }
+
+  const hasRootLayout = layoutFiles.some((f) => layoutPathToDir(f) === "");
+
+  processMiddlewares(middlewareFiles, imports);
+  processRoutes(files, middlewareFiles, imports, registrations);
+  processLayouts(layoutFiles, imports);
+  processPages(
+    pageFiles,
+    layoutFiles,
+    middlewareFiles,
+    hasRootLayout,
+    imports,
+    registrations,
+  );
 
   const hasConfig = fs.existsSync(CONFIG_FILE);
   const frameworkPath = relativeImportPath(
@@ -379,7 +622,10 @@ function generate() {
   ].join("\n");
 
   fs.writeFileSync(ENTRY_FILE, content);
-  console.log(`[gen] ${files.length} route(s) -> .rainjs/entry.ts`);
+  const total = files.length + pageFiles.length;
+  console.log(
+    `[gen] ${total} route(s) (${files.length} api, ${pageFiles.length} page, ${layoutFiles.length} layout) -> .rainjs/entry.ts`,
+  );
 }
 
 module.exports = {
@@ -387,14 +633,23 @@ module.exports = {
   loadBuildConfig,
   getRouteFiles,
   getMiddlewareFiles,
+  getPageFiles,
+  getLayoutFiles,
   getMiddlewaresForRoute,
+  getLayoutsForPage,
   filePathToUrlPath,
   filePathToImportName,
+  pageFilePathToUrlPath,
+  pageFilePathToImportName,
   middlewareImportName,
+  layoutImportName,
   detectExportedMethods,
   detectExportedMethodsFromContent,
   detectMiddlewareExport,
   detectMiddlewareExportFromContent,
+  detectDefaultExport,
+  detectDefaultExportFromContent,
+  validateNoPageRouteColocation,
   ROUTES_DIR,
   ENTRY_FILE,
   HTTP_METHODS,

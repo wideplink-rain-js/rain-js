@@ -1,4 +1,5 @@
 import type { Context } from "./context";
+import type { RainElement } from "./jsx/types";
 
 declare global {
   interface Env {}
@@ -16,6 +17,13 @@ export interface RainOptions {
 }
 
 export type Handler = (ctx: Context) => Response | Promise<Response>;
+
+export type PageHandler = (ctx: Context) => RainElement | Promise<RainElement>;
+
+export type LayoutHandler = (
+  ctx: Context,
+  children: RainElement,
+) => RainElement | Promise<RainElement>;
 
 export type Middleware = (
   ctx: Context,
