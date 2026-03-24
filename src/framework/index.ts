@@ -14,6 +14,8 @@ export {
   isRainElement,
   renderToString,
 } from "./jsx";
+export type { CorsOptions } from "./middleware/cors";
+export { cors } from "./middleware/cors";
 export { Rain } from "./router";
 export type {
   ErrorHandler,

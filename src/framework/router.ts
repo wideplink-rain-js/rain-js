@@ -209,6 +209,15 @@ export class Rain {
     });
   }
 
+  private mergeMiddlewares(routeMiddlewares: Middleware[]): Middleware[] {
+    if (this.globalMiddlewares.length === 0 && routeMiddlewares.length === 0) {
+      return [];
+    }
+    if (this.globalMiddlewares.length === 0) return routeMiddlewares;
+    if (routeMiddlewares.length === 0) return this.globalMiddlewares;
+    return [...this.globalMiddlewares, ...routeMiddlewares];
+  }
+
   private async handleRequest(request: Request, env: Env): Promise<Response> {
     const csrfResponse = this.validateCsrf(request);
     if (csrfResponse) return csrfResponse;
@@ -218,12 +227,14 @@ export class Rain {
 
     try {
       let pathMatched = false;
+      let firstMatchedMiddlewares: Middleware[] | undefined;
 
       for (const route of this.routes) {
         const match = pathname.match(route.pattern);
         if (!match) continue;
 
         pathMatched = true;
+        firstMatchedMiddlewares ??= route.middlewares;
 
         if (route.method !== method) continue;
 
@@ -236,10 +247,7 @@ export class Rain {
         });
 
         const ctx = new Context(request, params, env);
-        const allMiddlewares =
-          this.globalMiddlewares.length === 0
-            ? route.middlewares
-            : [...this.globalMiddlewares, ...route.middlewares];
+        const allMiddlewares = this.mergeMiddlewares(route.middlewares);
         const composed = this.composeMiddlewares(allMiddlewares, route.handler);
         const response = await composed(ctx);
 
@@ -260,15 +268,33 @@ export class Rain {
       }
 
       if (pathMatched) {
-        return new Response("Method Not Allowed", {
-          status: 405,
-        });
+        return this.buildMethodNotAllowed(
+          request,
+          env,
+          firstMatchedMiddlewares ?? [],
+        );
       }
 
       return new Response("Not Found", { status: 404 });
     } catch (error) {
       return this.handleError(error, request, pathname);
     }
+  }
+
+  private buildMethodNotAllowed(
+    request: Request,
+    env: Env,
+    routeMiddlewares: Middleware[],
+  ): Response | Promise<Response> {
+    const allMiddlewares = this.mergeMiddlewares(routeMiddlewares);
+    if (allMiddlewares.length === 0) {
+      return new Response("Method Not Allowed", { status: 405 });
+    }
+    const ctx = new Context(request, {}, env);
+    const methodNotAllowed: Handler = () =>
+      new Response("Method Not Allowed", { status: 405 });
+    const composed = this.composeMiddlewares(allMiddlewares, methodNotAllowed);
+    return composed(ctx);
   }
 
   private applySecurityHeaders(response: Response): Response {

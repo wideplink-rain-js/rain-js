@@ -144,4 +144,70 @@ describe("Middleware", () => {
     const res = await request(app, "/");
     expect(await res.text()).toBe("42");
   });
+
+  describe("405 Method Not Allowed", () => {
+    it("applies global middleware to 405", async () => {
+      const app = createApp({ csrf: false });
+      const order: string[] = [];
+
+      const mw: Middleware = (_ctx, next) => {
+        order.push("global");
+        return next();
+      };
+
+      app.use(mw);
+      app.get("/only-get", (ctx) => ctx.text("ok"));
+
+      const res = await request(app, "/only-get", { method: "POST" });
+      expect(res.status).toBe(405);
+      expect(order).toEqual(["global"]);
+    });
+
+    it("applies route middleware to 405", async () => {
+      const app = createApp({ csrf: false });
+      const order: string[] = [];
+
+      const routeMw: Middleware = (_ctx, next) => {
+        order.push("route");
+        return next();
+      };
+
+      app.get("/only-get", (ctx) => ctx.text("ok"), [routeMw]);
+
+      const res = await request(app, "/only-get", { method: "POST" });
+      expect(res.status).toBe(405);
+      expect(order).toEqual(["route"]);
+    });
+
+    it("applies global + route middleware to 405 in order", async () => {
+      const app = createApp({ csrf: false });
+      const order: string[] = [];
+
+      const globalMw: Middleware = (_ctx, next) => {
+        order.push("global");
+        return next();
+      };
+
+      const routeMw: Middleware = (_ctx, next) => {
+        order.push("route");
+        return next();
+      };
+
+      app.use(globalMw);
+      app.get("/only-get", (ctx) => ctx.text("ok"), [routeMw]);
+
+      const res = await request(app, "/only-get", { method: "POST" });
+      expect(res.status).toBe(405);
+      expect(order).toEqual(["global", "route"]);
+    });
+
+    it("returns 405 without middleware when none registered", async () => {
+      const app = createApp({ csrf: false });
+      app.get("/only-get", (ctx) => ctx.text("ok"));
+
+      const res = await request(app, "/only-get", { method: "POST" });
+      expect(res.status).toBe(405);
+      expect(await res.text()).toBe("Method Not Allowed");
+    });
+  });
 });
