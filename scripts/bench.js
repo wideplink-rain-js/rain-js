@@ -208,8 +208,8 @@ function benchEscapeHtml(escapeHtml) {
 function withSilentConsole(fn) {
   const origLog = console.log;
   const origWarn = console.warn;
-  console.log = () => {};
-  console.warn = () => {};
+  console.log = () => undefined;
+  console.warn = () => undefined;
   try {
     return fn();
   } finally {
@@ -223,8 +223,7 @@ function benchBuild() {
 }
 
 function benchDetectExportedMethods() {
-  const simple =
-    'export const GET: Handler = (ctx) => new Response("ok");';
+  const simple = 'export const GET: Handler = (ctx) => new Response("ok");';
   const multi =
     'export const GET: Handler = (ctx) => new Response("ok");\n' +
     'export const POST: Handler = (ctx) => new Response("ok");\n' +

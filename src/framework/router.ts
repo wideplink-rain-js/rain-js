@@ -1,7 +1,13 @@
 import { runWithBindings } from "./bindings";
 import { Context } from "./context";
 import { HttpError } from "./errors";
-import type { ErrorHandler, Handler, Middleware, RainOptions } from "./types";
+import type {
+  ErrorHandler,
+  Handler,
+  Middleware,
+  RainConfig,
+  RainOptions,
+} from "./types";
 import { escapeRegExp } from "./utils/regexp";
 import { safeDecodeURIComponent } from "./utils/url";
 
@@ -13,7 +19,7 @@ interface Route {
   middlewares: Middleware[];
 }
 
-const SECURITY_HEADERS: ReadonlyArray<readonly [string, string]> = [
+const DEFAULT_SECURITY_HEADERS: ReadonlyArray<readonly [string, string]> = [
   ["X-Content-Type-Options", "nosniff"],
   ["X-Frame-Options", "DENY"],
   ["Referrer-Policy", "strict-origin-when-cross-origin"],
@@ -22,14 +28,36 @@ const SECURITY_HEADERS: ReadonlyArray<readonly [string, string]> = [
 
 const STATE_CHANGING_METHODS = new Set(["POST", "PUT", "DELETE", "PATCH"]);
 
+function resolveSecurityHeaders(
+  config: Record<string, string> | false | undefined,
+): ReadonlyArray<readonly [string, string]> {
+  if (config === false) return [];
+  if (!config) return DEFAULT_SECURITY_HEADERS;
+  const merged = new Map<string, string>(
+    DEFAULT_SECURITY_HEADERS.map(([k, v]) => [k, v]),
+  );
+  for (const [key, value] of Object.entries(config)) {
+    merged.set(key, value);
+  }
+  return [...merged.entries()].map(([k, v]) => [k, v] as const);
+}
+
 export class Rain {
   private routes: Route[] = [];
   private globalMiddlewares: Middleware[] = [];
   private errorHandler: ErrorHandler | undefined;
   private csrfProtection: boolean;
+  private securityHeaders: ReadonlyArray<readonly [string, string]>;
 
-  constructor(options?: RainOptions) {
-    this.csrfProtection = options?.csrfProtection ?? true;
+  constructor(options?: RainConfig | RainOptions) {
+    const csrf =
+      (options as RainConfig | undefined)?.csrf ??
+      (options as RainOptions | undefined)?.csrfProtection ??
+      true;
+    this.csrfProtection = csrf;
+    this.securityHeaders = resolveSecurityHeaders(
+      (options as RainConfig | undefined)?.securityHeaders,
+    );
   }
 
   use(...middlewares: Middleware[]): void {
@@ -207,9 +235,10 @@ export class Rain {
   }
 
   private applySecurityHeaders(response: Response): Response {
+    if (this.securityHeaders.length === 0) return response;
     const headers = new Headers(response.headers);
     let modified = false;
-    for (const [name, value] of SECURITY_HEADERS) {
+    for (const [name, value] of this.securityHeaders) {
       if (!headers.has(name)) {
         headers.set(name, value);
         modified = true;
@@ -266,7 +295,7 @@ export class Rain {
       "If this is a legitimate cross-origin " +
       "request, configure CORS or disable " +
       "CSRF protection: " +
-      "new Rain({ csrfProtection: false })";
+      "new Rain({ csrf: false })";
     return new Response(message, {
       status: 403,
       headers: {

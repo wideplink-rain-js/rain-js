@@ -39,6 +39,7 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     ".rainjs/**/*.ts",
+    "rain.config.ts",
     "worker-configuration.d.ts"
   ],
   "exclude": ["node_modules", "scripts"]

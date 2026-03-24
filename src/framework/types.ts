@@ -4,6 +4,13 @@ declare global {
   interface Env {}
 }
 
+export interface RainConfig {
+  routesDir?: string;
+  outDir?: string;
+  csrf?: boolean;
+  securityHeaders?: Record<string, string> | false;
+}
+
 export interface RainOptions {
   csrfProtection?: boolean;
 }

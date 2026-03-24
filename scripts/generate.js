@@ -4,8 +4,66 @@ const { execSync } = require("node:child_process");
 const ts = require("typescript");
 
 const PROJECT_ROOT = process.cwd();
-const ROUTES_DIR = path.join(PROJECT_ROOT, "src", "routes");
-const ENTRY_FILE = path.join(PROJECT_ROOT, ".rainjs", "entry.ts");
+
+function unwrapExpression(node) {
+  if (ts.isSatisfiesExpression(node)) return node.expression;
+  if (ts.isAsExpression(node)) return node.expression;
+  if (ts.isParenthesizedExpression(node)) return node.expression;
+  return node;
+}
+
+function extractStringProps(obj, sourceFile, keys) {
+  const result = {};
+  for (const prop of obj.properties) {
+    if (
+      !(ts.isPropertyAssignment(prop) && ts.isStringLiteral(prop.initializer))
+    )
+      continue;
+    const name = prop.name.getText(sourceFile);
+    if (keys.includes(name)) result[name] = prop.initializer.text;
+  }
+  return result;
+}
+
+function loadBuildConfig() {
+  const configPath = path.join(PROJECT_ROOT, "rain.config.ts");
+  const defaults = { routesDir: "src/routes", outDir: ".rainjs" };
+  if (!fs.existsSync(configPath)) return defaults;
+
+  const content = fs.readFileSync(configPath, "utf-8");
+  const sourceFile = ts.createSourceFile(
+    "rain.config.ts",
+    content,
+    ts.ScriptTarget.Latest,
+    true,
+  );
+
+  const config = { ...defaults };
+
+  ts.forEachChild(sourceFile, (node) => {
+    if (!ts.isExportAssignment(node)) return;
+    const obj = unwrapExpression(node.expression);
+    if (!ts.isObjectLiteralExpression(obj)) return;
+    Object.assign(
+      config,
+      extractStringProps(obj, sourceFile, ["routesDir", "outDir"]),
+    );
+  });
+
+  return config;
+}
+
+const BUILD_CONFIG = loadBuildConfig();
+const ROUTES_DIR = path.join(PROJECT_ROOT, BUILD_CONFIG.routesDir);
+const ENTRY_FILE = path.join(PROJECT_ROOT, BUILD_CONFIG.outDir, "entry.ts");
+const CONFIG_FILE = path.join(PROJECT_ROOT, "rain.config.ts");
+
+function relativeImportPath(targetPath) {
+  const entryDir = path.dirname(ENTRY_FILE);
+  let rel = path.relative(entryDir, targetPath).replace(/\\/g, "/");
+  if (!rel.startsWith(".")) rel = `./${rel}`;
+  return rel;
+}
 
 const HTTP_METHODS = [
   "GET",
@@ -239,7 +297,7 @@ function generate() {
   const importedMiddlewares = new Set();
   for (const mwFile of middlewareFiles) {
     const fullMwPath = path.join(ROUTES_DIR, mwFile);
-    const relMwPath = `src/routes/${mwFile.replace(/\\/g, "/")}`;
+    const relMwPath = `${BUILD_CONFIG.routesDir}/${mwFile.replace(/\\/g, "/")}`;
     if (!detectMiddlewareExport(fullMwPath)) {
       console.error(
         `[Rain] No "onRequest" export found in ${relMwPath}. ` +
@@ -249,7 +307,9 @@ function generate() {
       continue;
     }
     const name = middlewareImportName(mwFile);
-    const importPath = `../src/routes/${mwFile.replace(/\.tsx?$/, "").replace(/\\/g, "/")}`;
+    const importPath = relativeImportPath(
+      path.join(ROUTES_DIR, mwFile.replace(/\.tsx?$/, "")),
+    );
     imports.push(`import { onRequest as ${name} } from "${importPath}";`);
     importedMiddlewares.add(name);
   }
@@ -257,12 +317,14 @@ function generate() {
   for (const file of files) {
     const importName = filePathToImportName(file);
     const urlPath = filePathToUrlPath(file);
-    const importPath = `../src/routes/${file.replace(/\.tsx?$/, "").replace(/\\/g, "/")}`;
+    const importPath = relativeImportPath(
+      path.join(ROUTES_DIR, file.replace(/\.tsx?$/, "")),
+    );
     const fullPath = path.join(ROUTES_DIR, file);
 
     const methods = detectExportedMethods(fullPath);
     if (methods.length === 0) {
-      const relPath = `src/routes/${file.replace(/\\/g, "/")}`;
+      const relPath = `${BUILD_CONFIG.routesDir}/${file.replace(/\\/g, "/")}`;
       console.error(
         `[Rain] No exported handlers found in ${relPath}. ` +
           "Add an exported handler, e.g.: export const GET: Handler = (ctx) => { ... }",
@@ -287,11 +349,28 @@ function generate() {
     }
   }
 
+  const hasConfig = fs.existsSync(CONFIG_FILE);
+  const frameworkPath = relativeImportPath(
+    path.join(PROJECT_ROOT, "src", "framework"),
+  );
+
+  const headerImports = [`import { Rain } from "${frameworkPath}";`];
+  if (hasConfig) {
+    const configPath = relativeImportPath(
+      path.join(PROJECT_ROOT, "rain.config"),
+    );
+    headerImports.push(`import config from "${configPath}";`);
+  }
+
+  const appInit = hasConfig
+    ? "const app = new Rain(config);"
+    : "const app = new Rain();";
+
   const content = [
-    'import { Rain } from "../src/framework";',
+    ...headerImports,
     ...imports,
     "",
-    "const app = new Rain();",
+    appInit,
     "",
     ...registrations,
     "",
@@ -305,6 +384,7 @@ function generate() {
 
 module.exports = {
   generate,
+  loadBuildConfig,
   getRouteFiles,
   getMiddlewareFiles,
   getMiddlewaresForRoute,
