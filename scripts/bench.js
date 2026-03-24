@@ -1,6 +1,11 @@
 const { buildSync } = require("esbuild");
 const path = require("node:path");
 const { performance } = require("node:perf_hooks");
+const {
+  generate,
+  detectExportedMethodsFromContent,
+  detectMiddlewareExportFromContent,
+} = require("./generate");
 
 const FRAMEWORK_PATH = path.join(
   __dirname,
@@ -200,6 +205,63 @@ function benchEscapeHtml(escapeHtml) {
   };
 }
 
+function withSilentConsole(fn) {
+  const origLog = console.log;
+  const origWarn = console.warn;
+  console.log = () => {};
+  console.warn = () => {};
+  try {
+    return fn();
+  } finally {
+    console.log = origLog;
+    console.warn = origWarn;
+  }
+}
+
+function benchBuild() {
+  return bench("ビルド (generate)", () => withSilentConsole(generate), 100);
+}
+
+function benchDetectExportedMethods() {
+  const simple =
+    'export const GET: Handler = (ctx) => new Response("ok");';
+  const multi =
+    'export const GET: Handler = (ctx) => new Response("ok");\n' +
+    'export const POST: Handler = (ctx) => new Response("ok");\n' +
+    'export const PUT: Handler = (ctx) => new Response("ok");\n' +
+    'export const DELETE: Handler = (ctx) => new Response("ok");\n' +
+    'export const PATCH: Handler = (ctx) => new Response("ok");';
+  const reExport =
+    'const GET = () => new Response("");\n' +
+    'const POST = () => new Response("");\n' +
+    "export { GET, POST };";
+
+  return {
+    simple: () =>
+      bench("AST メソッド検出 (単一)", () =>
+        detectExportedMethodsFromContent(simple),
+      ),
+    multi: () =>
+      bench("AST メソッド検出 (5メソッド)", () =>
+        detectExportedMethodsFromContent(multi),
+      ),
+    reExport: () =>
+      bench("AST メソッド検出 (re-export)", () =>
+        detectExportedMethodsFromContent(reExport),
+      ),
+  };
+}
+
+function benchDetectMiddlewareExport() {
+  const content =
+    "export const onRequest: Middleware = " +
+    "async (ctx, next) => { return await next(); };";
+  return () =>
+    bench("AST ミドルウェア検出", () =>
+      detectMiddlewareExportFromContent(content),
+    );
+}
+
 function benchBundleSize() {
   const result = buildSync({
     entryPoints: [FRAMEWORK_PATH],
@@ -353,6 +415,21 @@ async function main() {
     await escapeBenches.heavy(),
   ];
   printTable(escapeResults);
+
+  console.log("\n## ビルド (generate)\n");
+  const buildResults = [await benchBuild()];
+  printTable(buildResults);
+
+  console.log("\n## TypeScript AST パース\n");
+  const astMethodBenches = benchDetectExportedMethods();
+  const astMwBench = benchDetectMiddlewareExport();
+  const astResults = [
+    await astMethodBenches.simple(),
+    await astMethodBenches.multi(),
+    await astMethodBenches.reExport(),
+    await astMwBench(),
+  ];
+  printTable(astResults);
 
   console.log(`\n${"=".repeat(60)}`);
   console.log("完了");

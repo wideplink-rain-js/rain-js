@@ -20,7 +20,7 @@ const SECURITY_HEADERS: ReadonlyArray<readonly [string, string]> = [
   ["X-XSS-Protection", "0"],
 ];
 
-const STATE_CHANGING_METHODS = new Set(["POST", "PUT", "DELETE"]);
+const STATE_CHANGING_METHODS = new Set(["POST", "PUT", "DELETE", "PATCH"]);
 
 export class Rain {
   private routes: Route[] = [];
@@ -94,6 +94,18 @@ export class Rain {
     this.addRoute("DELETE", path, handler, middlewares);
   }
 
+  patch(path: string, handler: Handler, middlewares?: Middleware[]): void {
+    this.addRoute("PATCH", path, handler, middlewares);
+  }
+
+  head(path: string, handler: Handler, middlewares?: Middleware[]): void {
+    this.addRoute("HEAD", path, handler, middlewares);
+  }
+
+  options(path: string, handler: Handler, middlewares?: Middleware[]): void {
+    this.addRoute("OPTIONS", path, handler, middlewares);
+  }
+
   private composeMiddlewares(
     middlewares: Middleware[],
     handler: Handler,
@@ -127,18 +139,12 @@ export class Rain {
   ): Promise<Response> {
     const resolvedEnv = env ?? ({} as Env);
     return runWithBindings(resolvedEnv, async () => {
-      const response = await this.handleRequest(
-        request,
-        resolvedEnv,
-      );
+      const response = await this.handleRequest(request, resolvedEnv);
       return this.applySecurityHeaders(response);
     });
   }
 
-  private async handleRequest(
-    request: Request,
-    env: Env,
-  ): Promise<Response> {
+  private async handleRequest(request: Request, env: Env): Promise<Response> {
     const csrfResponse = this.validateCsrf(request);
     if (csrfResponse) return csrfResponse;
 

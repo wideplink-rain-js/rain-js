@@ -3,14 +3,18 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  "bin": {
+    "rainjs": "./cli/index.js"
+  },
   "scripts": {
     "dev": "node scripts/dev.js",
+    "build": "node scripts/generate.js",
     "lint": "biome lint .",
     "format": "biome format --write .",
     "check": "biome check --write .",
     "typecheck": "tsc --noEmit",
     "ci": "biome ci . && tsc --noEmit",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test tests/**/*.test.js",
     "bench": "node scripts/bench.js"
   },
   "keywords": [],
