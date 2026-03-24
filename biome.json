@@ -7,7 +7,7 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "includes": ["src/**", "scripts/**", ".rainjs/**"]
+    "includes": ["src/**", "scripts/**", "tests/**", ".rainjs/**"]
   },
   "formatter": {
     "enabled": true,
@@ -115,6 +115,19 @@
         "rules": {
           "style": {
             "noNamespace": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["tests/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
+          },
+          "correctness": {
+            "noUnusedFunctionParameters": "off"
           }
         }
       }

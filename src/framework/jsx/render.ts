@@ -1,3 +1,4 @@
+import { Fragment } from "./createElement";
 import { escapeHtml } from "./escape";
 import { RAIN_ELEMENT, type RainElement, type RainNode } from "./types";
 
@@ -117,6 +118,9 @@ function renderElement(element: RainElement): string {
   const { tag, props, children } = element;
 
   if (typeof tag === "function") {
+    if (tag === Fragment) {
+      return renderChildren(children);
+    }
     const result = tag({ ...props, children });
     if (result === null) return "";
     if (typeof result === "string") return escapeHtml(result);

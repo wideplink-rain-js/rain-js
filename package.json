@@ -14,7 +14,9 @@
     "check": "biome check --write .",
     "typecheck": "tsc --noEmit",
     "ci": "biome ci . && tsc --noEmit",
-    "test": "node --test tests/**/*.test.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:generate": "node --test tests/generate.test.js",
     "bench": "node scripts/bench.js"
   },
   "keywords": [],
@@ -29,6 +31,7 @@
     "@cloudflare/workers-types": "^4.20260317.1",
     "@types/node": "^25.5.0",
     "typescript": "^5.9.3",
+    "vitest": "^4.1.1",
     "wrangler": "^4.76.0"
   }
 }
