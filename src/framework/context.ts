@@ -1,5 +1,8 @@
+import { HttpError } from "./errors";
 import { isRainElement, renderToString } from "./jsx";
 import type { RainElement } from "./jsx/types";
+
+const DEFAULT_MAX_BODY_SIZE = 1_048_576;
 
 export class Context {
   readonly req: Request;
@@ -103,5 +106,111 @@ export class Context {
       status,
       headers: { location },
     });
+  }
+
+  async parseJson<T = unknown>(options?: { maxSize?: number }): Promise<T> {
+    const ct = this.header("content-type");
+    if (!ct?.includes("application/json")) {
+      throw new HttpError(
+        415,
+        "[Rain] ctx.parseJson() expected " +
+          "Content-Type 'application/json' " +
+          `but received '${ct ?? "(none)"}'.` +
+          " Ensure the client sends the " +
+          "correct Content-Type header.",
+      );
+    }
+    const maxSize = options?.maxSize ?? DEFAULT_MAX_BODY_SIZE;
+    this.assertBodySize(maxSize, "parseJson");
+    const raw = await this.req.text();
+    if (raw.length > maxSize) {
+      throw this.bodyTooLargeError(maxSize, "parseJson");
+    }
+    try {
+      return JSON.parse(raw) as T;
+    } catch (cause) {
+      throw new HttpError(
+        400,
+        "[Rain] ctx.parseJson() failed to " +
+          "parse request body as JSON. " +
+          "Ensure the request body is " +
+          "valid JSON.",
+        { cause },
+      );
+    }
+  }
+
+  async parseFormData(options?: { maxSize?: number }): Promise<FormData> {
+    const ct = this.header("content-type");
+    const isUrlEncoded =
+      ct?.includes("application/x-www-form-urlencoded") ?? false;
+    const isMultipart = ct?.includes("multipart/form-data") ?? false;
+    if (!(isUrlEncoded || isMultipart)) {
+      throw new HttpError(
+        415,
+        "[Rain] ctx.parseFormData() expected " +
+          "Content-Type " +
+          "'multipart/form-data' or " +
+          "'application/" +
+          "x-www-form-urlencoded' but " +
+          `received '${ct ?? "(none)"}'.` +
+          " Ensure the client sends the " +
+          "correct Content-Type header.",
+      );
+    }
+    const maxSize = options?.maxSize ?? DEFAULT_MAX_BODY_SIZE;
+    this.assertBodySize(maxSize, "parseFormData");
+    try {
+      return await this.req.formData();
+    } catch (cause) {
+      throw new HttpError(
+        400,
+        "[Rain] ctx.parseFormData() failed " +
+          "to parse request body. Ensure " +
+          "the body matches the " +
+          "Content-Type header.",
+        { cause },
+      );
+    }
+  }
+
+  async parseText(options?: { maxSize?: number }): Promise<string> {
+    const maxSize = options?.maxSize ?? DEFAULT_MAX_BODY_SIZE;
+    this.assertBodySize(maxSize, "parseText");
+    const raw = await this.req.text();
+    if (raw.length > maxSize) {
+      throw this.bodyTooLargeError(maxSize, "parseText");
+    }
+    return raw;
+  }
+
+  async parseArrayBuffer(options?: { maxSize?: number }): Promise<ArrayBuffer> {
+    const maxSize = options?.maxSize ?? DEFAULT_MAX_BODY_SIZE;
+    this.assertBodySize(maxSize, "parseArrayBuffer");
+    const buf = await this.req.arrayBuffer();
+    if (buf.byteLength > maxSize) {
+      throw this.bodyTooLargeError(maxSize, "parseArrayBuffer");
+    }
+    return buf;
+  }
+
+  private assertBodySize(maxSize: number, method: string): void {
+    const cl = this.header("content-length");
+    if (cl === null) return;
+    const size = Number.parseInt(cl, 10);
+    if (!Number.isNaN(size) && size > maxSize) {
+      throw this.bodyTooLargeError(maxSize, method);
+    }
+  }
+
+  private bodyTooLargeError(maxSize: number, method: string): HttpError {
+    return new HttpError(
+      413,
+      `[Rain] ctx.${method}() request body ` +
+        "exceeds the maximum size of " +
+        `${maxSize} bytes. Increase the ` +
+        `limit: ctx.${method}` +
+        `({ maxSize: ${maxSize * 2} })`,
+    );
   }
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Context, createElement } from "../../src/framework";
+import { Context, createElement, HttpError } from "../../src/framework";
 
 describe("Context", () => {
   function createCtx(
@@ -141,6 +141,163 @@ describe("Context", () => {
         allowExternal: true,
       });
       expect(res.status).toBe(302);
+    });
+  });
+
+  describe("parseJson()", () => {
+    it("parses valid JSON body", async () => {
+      const ctx = createCtx("http://localhost/", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ name: "rain" }),
+      });
+      const data = await ctx.parseJson<{ name: string }>();
+      expect(data).toEqual({ name: "rain" });
+    });
+
+    it("accepts charset in Content-Type", async () => {
+      const ctx = createCtx("http://localhost/", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        body: JSON.stringify({ ok: true }),
+      });
+      expect(await ctx.parseJson()).toEqual({
+        ok: true,
+      });
+    });
+
+    it("rejects wrong Content-Type", async () => {
+      const ctx = createCtx("http://localhost/", {
+        method: "POST",
+        headers: {
+          "content-type": "text/plain",
+        },
+        body: "{}",
+      });
+      const err = await ctx.parseJson().catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(HttpError);
+      expect((err as HttpError).status).toBe(415);
+    });
+
+    it("rejects missing Content-Type", async () => {
+      const ctx = createCtx("http://localhost/", {
+        method: "POST",
+      });
+      const err = await ctx.parseJson().catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(HttpError);
+      expect((err as HttpError).status).toBe(415);
+    });
+
+    it("rejects invalid JSON with 400", async () => {
+      const ctx = createCtx("http://localhost/", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: "{invalid",
+      });
+      const err = await ctx.parseJson().catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(HttpError);
+      expect((err as HttpError).status).toBe(400);
+    });
+
+    it("rejects body exceeding maxSize", async () => {
+      const ctx = createCtx("http://localhost/", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          d: "x".repeat(200),
+        }),
+      });
+      const err = await ctx.parseJson({ maxSize: 10 }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(HttpError);
+      expect((err as HttpError).status).toBe(413);
+    });
+  });
+
+  describe("parseFormData()", () => {
+    it("parses urlencoded form data", async () => {
+      const ctx = createCtx("http://localhost/", {
+        method: "POST",
+        body: new URLSearchParams({
+          name: "rain",
+        }),
+      });
+      const form = await ctx.parseFormData();
+      expect(form.get("name")).toBe("rain");
+    });
+
+    it("parses multipart form data", async () => {
+      const body = new FormData();
+      body.append("key", "value");
+      const ctx = createCtx("http://localhost/", {
+        method: "POST",
+        body,
+      });
+      const form = await ctx.parseFormData();
+      expect(form.get("key")).toBe("value");
+    });
+
+    it("rejects wrong Content-Type", async () => {
+      const ctx = createCtx("http://localhost/", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: "{}",
+      });
+      const err = await ctx.parseFormData().catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(HttpError);
+      expect((err as HttpError).status).toBe(415);
+    });
+  });
+
+  describe("parseText()", () => {
+    it("parses text body", async () => {
+      const ctx = createCtx("http://localhost/", {
+        method: "POST",
+        body: "hello world",
+      });
+      expect(await ctx.parseText()).toBe("hello world");
+    });
+
+    it("rejects body exceeding maxSize", async () => {
+      const ctx = createCtx("http://localhost/", {
+        method: "POST",
+        body: "x".repeat(200),
+      });
+      const err = await ctx.parseText({ maxSize: 10 }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(HttpError);
+      expect((err as HttpError).status).toBe(413);
+    });
+  });
+
+  describe("parseArrayBuffer()", () => {
+    it("parses array buffer body", async () => {
+      const ctx = createCtx("http://localhost/", {
+        method: "POST",
+        body: "binary data",
+      });
+      const buf = await ctx.parseArrayBuffer();
+      expect(buf.byteLength).toBeGreaterThan(0);
+    });
+
+    it("rejects body exceeding maxSize", async () => {
+      const ctx = createCtx("http://localhost/", {
+        method: "POST",
+        body: "x".repeat(200),
+      });
+      const err = await ctx
+        .parseArrayBuffer({ maxSize: 10 })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(HttpError);
+      expect((err as HttpError).status).toBe(413);
     });
   });
 });
