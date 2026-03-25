@@ -1,6 +1,7 @@
 import { HttpError } from "./errors";
 import { isRainElement, renderToString } from "./jsx";
 import type { RainElement } from "./jsx/types";
+import type { StateKey } from "./types";
 
 const DEFAULT_MAX_BODY_SIZE = 1_048_576;
 
@@ -10,16 +11,19 @@ export class Context {
   readonly state: Map<string, unknown>;
   readonly bindings: Env;
   private cachedUrl: URL | undefined;
+  private executionCtx: ExecutionContext | undefined;
 
   constructor(
     req: Request,
     params: Record<string, string>,
     env: Env = {} as Env,
+    executionCtx?: ExecutionContext,
   ) {
     this.req = req;
     this.params = params;
     this.state = new Map();
     this.bindings = env;
+    this.executionCtx = executionCtx;
   }
 
   get url(): URL {
@@ -41,6 +45,26 @@ export class Context {
 
   header(name: string): string | null {
     return this.req.headers.get(name);
+  }
+
+  waitUntil(promise: Promise<unknown>): void {
+    if (!this.executionCtx) {
+      throw new Error(
+        "[Rain] ctx.waitUntil() called without an ExecutionContext. " +
+          "This typically happens in tests. " +
+          "Pass an ExecutionContext when creating " +
+          "the Context, or mock it in your test setup.",
+      );
+    }
+    this.executionCtx.waitUntil(promise);
+  }
+
+  get<T>(key: StateKey<T>): T | undefined {
+    return this.state.get(key.id) as T | undefined;
+  }
+
+  set<T>(key: StateKey<T>, value: T): void {
+    this.state.set(key.id, value);
   }
 
   json(data: unknown, status = 200): Response {

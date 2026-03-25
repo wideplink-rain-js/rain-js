@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { Context, createElement, HttpError } from "../../src/framework";
+import { describe, expect, it, vi } from "vitest";
+import {
+  Context,
+  createElement,
+  defineKey,
+  HttpError,
+} from "../../src/framework";
 
 describe("Context", () => {
   function createCtx(
@@ -298,6 +303,63 @@ describe("Context", () => {
         .catch((e: unknown) => e);
       expect(err).toBeInstanceOf(HttpError);
       expect((err as HttpError).status).toBe(413);
+    });
+  });
+
+  describe("waitUntil()", () => {
+    it("delegates to ExecutionContext", () => {
+      const waitUntil = vi.fn();
+      const executionCtx = {
+        waitUntil,
+        passThroughOnException: vi.fn(),
+      } as unknown as ExecutionContext;
+      const ctx = new Context(
+        new Request("http://localhost/"),
+        {},
+        {} as Env,
+        executionCtx,
+      );
+      const p = Promise.resolve();
+      ctx.waitUntil(p);
+      expect(waitUntil).toHaveBeenCalledWith(p);
+    });
+
+    it("throws without ExecutionContext", () => {
+      const ctx = createCtx();
+      expect(() => ctx.waitUntil(Promise.resolve())).toThrow("ctx.waitUntil()");
+    });
+  });
+
+  describe("typed state (defineKey)", () => {
+    it("stores and retrieves typed values", () => {
+      const ctx = createCtx();
+      const userKey = defineKey<{ name: string }>("user");
+      ctx.set(userKey, { name: "rain" });
+      expect(ctx.get(userKey)).toEqual({ name: "rain" });
+    });
+
+    it("returns undefined for unset keys", () => {
+      const ctx = createCtx();
+      const key = defineKey<number>("counter");
+      expect(ctx.get(key)).toBeUndefined();
+    });
+
+    it("overwrites existing values", () => {
+      const ctx = createCtx();
+      const key = defineKey<string>("token");
+      ctx.set(key, "old");
+      ctx.set(key, "new");
+      expect(ctx.get(key)).toBe("new");
+    });
+
+    it("isolates keys with different ids", () => {
+      const ctx = createCtx();
+      const keyA = defineKey<string>("a");
+      const keyB = defineKey<string>("b");
+      ctx.set(keyA, "alpha");
+      ctx.set(keyB, "beta");
+      expect(ctx.get(keyA)).toBe("alpha");
+      expect(ctx.get(keyB)).toBe("beta");
     });
   });
 });

@@ -322,4 +322,55 @@ describe("Rain Router", () => {
       expect((err.cause as Error).message).toBe("inner broken");
     });
   });
+
+  describe("HEAD fallback to GET", () => {
+    it("falls back to GET handler for HEAD requests", async () => {
+      const app = createApp({ csrf: false });
+      app.get("/resource", (ctx) => ctx.json({ ok: true }));
+      const res = await request(app, "/resource", { method: "HEAD" });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe(
+        "application/json; charset=UTF-8",
+      );
+    });
+
+    it("returns empty body for HEAD fallback", async () => {
+      const app = createApp({ csrf: false });
+      app.get("/resource", (ctx) => ctx.text("hello"));
+      const res = await request(app, "/resource", { method: "HEAD" });
+      expect(await res.text()).toBe("");
+    });
+
+    it("prefers explicit HEAD handler over GET", async () => {
+      const app = createApp({ csrf: false });
+      app.get("/resource", (ctx) => ctx.text("get"));
+      app.head("/resource", () => {
+        return new Response(null, {
+          status: 204,
+          headers: { "x-head": "explicit" },
+        });
+      });
+      const res = await request(app, "/resource", { method: "HEAD" });
+      expect(res.status).toBe(204);
+      expect(res.headers.get("x-head")).toBe("explicit");
+    });
+
+    it("returns 405 for HEAD when no GET exists", async () => {
+      const app = createApp({ csrf: false });
+      app.post("/only-post", (ctx) => ctx.text("post"));
+      const res = await request(app, "/only-post", { method: "HEAD" });
+      expect(res.status).toBe(405);
+    });
+
+    it("works with dynamic routes", async () => {
+      const app = createApp({ csrf: false });
+      app.get("/user/:id", (ctx) => ctx.json({ id: ctx.params["id"] }));
+      const res = await request(app, "/user/42", { method: "HEAD" });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe(
+        "application/json; charset=UTF-8",
+      );
+      expect(await res.text()).toBe("");
+    });
+  });
 });

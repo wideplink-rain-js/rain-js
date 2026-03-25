@@ -5,6 +5,15 @@ declare global {
   interface Env {}
 }
 
+export interface StateKey<T> {
+  readonly id: string;
+  readonly _brand: T;
+}
+
+export function defineKey<T>(id: string): StateKey<T> {
+  return { id } as StateKey<T>;
+}
+
 export interface RainConfig {
   routesDir?: string;
   outDir?: string;

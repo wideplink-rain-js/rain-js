@@ -25,4 +25,6 @@ export type {
   PageHandler,
   RainConfig,
   RainOptions,
+  StateKey,
 } from "./types";
+export { defineKey } from "./types";

@@ -200,11 +200,15 @@ export class Rain {
   fetch(
     request: Request,
     env?: Env,
-    _executionCtx?: ExecutionContext,
+    executionCtx?: ExecutionContext,
   ): Promise<Response> {
     const resolvedEnv = env ?? ({} as Env);
     return runWithBindings(resolvedEnv, async () => {
-      const response = await this.handleRequest(request, resolvedEnv);
+      const response = await this.handleRequest(
+        request,
+        resolvedEnv,
+        executionCtx,
+      );
       return this.applySecurityHeaders(response);
     });
   }
@@ -218,7 +222,11 @@ export class Rain {
     return [...this.globalMiddlewares, ...routeMiddlewares];
   }
 
-  private async handleRequest(request: Request, env: Env): Promise<Response> {
+  private async handleRequest(
+    request: Request,
+    env: Env,
+    executionCtx?: ExecutionContext,
+  ): Promise<Response> {
     const csrfResponse = this.validateCsrf(request);
     if (csrfResponse) return csrfResponse;
 
@@ -226,52 +234,37 @@ export class Rain {
     const method = request.method;
 
     try {
-      let pathMatched = false;
-      let firstMatchedMiddlewares: Middleware[] | undefined;
+      const result = this.matchRoute(method, pathname);
 
-      for (const route of this.routes) {
-        const match = pathname.match(route.pattern);
-        if (!match) continue;
-
-        pathMatched = true;
-        firstMatchedMiddlewares ??= route.middlewares;
-
-        if (route.method !== method) continue;
-
-        const params: Record<string, string> = {};
-        route.paramNames.forEach((name, i) => {
-          const value = match[i + 1];
-          if (value !== undefined) {
-            params[name] = safeDecodeURIComponent(value);
-          }
-        });
-
-        const ctx = new Context(request, params, env);
-        const allMiddlewares = this.mergeMiddlewares(route.middlewares);
-        const composed = this.composeMiddlewares(allMiddlewares, route.handler);
-        const response = await composed(ctx);
-
-        if (!(response instanceof Response)) {
-          const detail =
-            `Route handler for ${method} ${pathname}` +
-            " did not return a Response object.";
-          const fix =
-            "Return a Response from your handler:" +
-            " return ctx.text('Hello') or return new Response(...)";
-          console.error(`[Rain] ${detail} ${fix}`);
-          return new Response("Internal Server Error", {
-            status: 500,
-          });
-        }
-
-        return response;
+      if (result.route) {
+        return await this.executeRoute(
+          result.route,
+          result.match,
+          request,
+          env,
+          executionCtx,
+          method,
+          pathname,
+        );
       }
 
-      if (pathMatched) {
+      if (method === "HEAD" && result.getFallback) {
+        return await this.executeHeadFallback(
+          result.getFallback.route,
+          result.getFallback.match,
+          request,
+          env,
+          executionCtx,
+          pathname,
+        );
+      }
+
+      if (result.pathMatched) {
         return this.buildMethodNotAllowed(
           request,
           env,
-          firstMatchedMiddlewares ?? [],
+          executionCtx,
+          result.firstMiddlewares ?? [],
         );
       }
 
@@ -281,16 +274,121 @@ export class Rain {
     }
   }
 
+  private matchRoute(
+    method: string,
+    pathname: string,
+  ): {
+    route?: Route;
+    match: RegExpMatchArray;
+    pathMatched: boolean;
+    firstMiddlewares?: Middleware[] | undefined;
+    getFallback?: { route: Route; match: RegExpMatchArray };
+  } {
+    let pathMatched = false;
+    let firstMiddlewares: Middleware[] | undefined;
+    let getFallback: { route: Route; match: RegExpMatchArray } | undefined;
+    const trackGetFallback = method === "HEAD";
+
+    for (const route of this.routes) {
+      const match = pathname.match(route.pattern);
+      if (!match) continue;
+
+      pathMatched = true;
+      firstMiddlewares ??= route.middlewares;
+
+      if (route.method === method) {
+        return { route, match, pathMatched, firstMiddlewares };
+      }
+
+      if (trackGetFallback && route.method === "GET" && !getFallback) {
+        getFallback = { route, match };
+      }
+    }
+
+    const base = {
+      match: [] as unknown as RegExpMatchArray,
+      pathMatched,
+      firstMiddlewares,
+    };
+    if (getFallback) {
+      return { ...base, getFallback };
+    }
+    return base;
+  }
+
+  private async executeHeadFallback(
+    route: Route,
+    match: RegExpMatchArray,
+    request: Request,
+    env: Env,
+    executionCtx: ExecutionContext | undefined,
+    pathname: string,
+  ): Promise<Response> {
+    const response = await this.executeRoute(
+      route,
+      match,
+      request,
+      env,
+      executionCtx,
+      "HEAD",
+      pathname,
+    );
+    return new Response(null, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+  }
+
+  private async executeRoute(
+    route: Route,
+    match: RegExpMatchArray,
+    request: Request,
+    env: Env,
+    executionCtx: ExecutionContext | undefined,
+    method: string,
+    pathname: string,
+  ): Promise<Response> {
+    const params: Record<string, string> = {};
+    route.paramNames.forEach((name, i) => {
+      const value = match[i + 1];
+      if (value !== undefined) {
+        params[name] = safeDecodeURIComponent(value);
+      }
+    });
+
+    const ctx = new Context(request, params, env, executionCtx);
+    const allMiddlewares = this.mergeMiddlewares(route.middlewares);
+    const composed = this.composeMiddlewares(allMiddlewares, route.handler);
+    const response = await composed(ctx);
+
+    if (!(response instanceof Response)) {
+      const detail =
+        `Route handler for ${method} ${pathname}` +
+        " did not return a Response object.";
+      const fix =
+        "Return a Response from your handler:" +
+        " return ctx.text('Hello') or return new Response(...)";
+      console.error(`[Rain] ${detail} ${fix}`);
+      return new Response("Internal Server Error", {
+        status: 500,
+      });
+    }
+
+    return response;
+  }
+
   private buildMethodNotAllowed(
     request: Request,
     env: Env,
+    executionCtx: ExecutionContext | undefined,
     routeMiddlewares: Middleware[],
   ): Response | Promise<Response> {
     const allMiddlewares = this.mergeMiddlewares(routeMiddlewares);
     if (allMiddlewares.length === 0) {
       return new Response("Method Not Allowed", { status: 405 });
     }
-    const ctx = new Context(request, {}, env);
+    const ctx = new Context(request, {}, env, executionCtx);
     const methodNotAllowed: Handler = () =>
       new Response("Method Not Allowed", { status: 405 });
     const composed = this.composeMiddlewares(allMiddlewares, methodNotAllowed);
