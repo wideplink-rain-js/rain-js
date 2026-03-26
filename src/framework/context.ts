@@ -1,7 +1,9 @@
+import type { CookieOptions } from "./cookie";
+import { parseCookies, serializeCookie } from "./cookie";
 import { HttpError } from "./errors";
 import { isRainElement, renderToString } from "./jsx";
 import type { RainElement } from "./jsx/types";
-import type { StateKey } from "./types";
+import type { Schema, StateKey } from "./types";
 
 const DEFAULT_MAX_BODY_SIZE = 1_048_576;
 
@@ -12,6 +14,8 @@ export class Context {
   readonly bindings: Env;
   private cachedUrl: URL | undefined;
   private executionCtx: ExecutionContext | undefined;
+  private cachedCookies: Map<string, string> | undefined;
+  private pendingCookies: string[];
 
   constructor(
     req: Request,
@@ -24,6 +28,7 @@ export class Context {
     this.state = new Map();
     this.bindings = env;
     this.executionCtx = executionCtx;
+    this.pendingCookies = [];
   }
 
   get url(): URL {
@@ -45,6 +50,34 @@ export class Context {
 
   header(name: string): string | null {
     return this.req.headers.get(name);
+  }
+
+  cookie(name: string): string | undefined {
+    this.cachedCookies ??= parseCookies(this.req.headers.get("cookie"));
+    return this.cachedCookies.get(name);
+  }
+
+  setCookie(name: string, value: string, options?: CookieOptions): void {
+    this.pendingCookies.push(serializeCookie(name, value, options));
+  }
+
+  deleteCookie(
+    name: string,
+    options?: Pick<CookieOptions, "path" | "domain">,
+  ): void {
+    this.pendingCookies.push(
+      serializeCookie(name, "", {
+        ...options,
+        maxAge: 0,
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      }),
+    );
+  }
+
+  getPendingCookies(): readonly string[] {
+    return this.pendingCookies;
   }
 
   waitUntil(promise: Promise<unknown>): void {
@@ -159,6 +192,59 @@ export class Context {
           "parse request body as JSON. " +
           "Ensure the request body is " +
           "valid JSON.",
+        { cause },
+      );
+    }
+  }
+
+  async parseJsonWith<T>(
+    schema: Schema<T>,
+    options?: { maxSize?: number },
+  ): Promise<T> {
+    const raw = await this.parseJson(options);
+    try {
+      return schema.parse(raw);
+    } catch (cause) {
+      throw new HttpError(
+        422,
+        "[Rain] ctx.parseJsonWith() validation failed. " +
+          "The request body did not match the expected " +
+          "schema. Check the request payload against " +
+          "the schema definition.",
+        { cause },
+      );
+    }
+  }
+
+  async parseFormDataWith<T>(
+    schema: Schema<T>,
+    options?: { maxSize?: number },
+  ): Promise<T> {
+    const formData = await this.parseFormData(options);
+    const data: Record<string, string> = {};
+    for (const [key, value] of formData.entries()) {
+      if (typeof value === "string") {
+        data[key] = value;
+      } else {
+        throw new HttpError(
+          422,
+          `[Rain] ctx.parseFormDataWith() received a ` +
+            `File for field "${key}". ` +
+            "parseFormDataWith() only supports string " +
+            "fields. Use ctx.parseFormData() directly " +
+            "to handle file uploads.",
+        );
+      }
+    }
+    try {
+      return schema.parse(data);
+    } catch (cause) {
+      throw new HttpError(
+        422,
+        "[Rain] ctx.parseFormDataWith() validation " +
+          "failed. The form data did not match the " +
+          "expected schema. Check submitted form " +
+          "fields against the schema definition.",
         { cause },
       );
     }

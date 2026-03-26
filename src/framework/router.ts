@@ -268,10 +268,7 @@ export class Rain {
         );
       }
 
-      const assetResponse = await this.tryServeStaticAsset(
-        request,
-        env,
-      );
+      const assetResponse = await this.tryServeStaticAsset(request, env);
       if (assetResponse) return assetResponse;
 
       return new Response("Not Found", { status: 404 });
@@ -381,24 +378,28 @@ export class Rain {
       });
     }
 
-    return response;
+    return this.applyCookies(response, ctx);
   }
 
-  private buildMethodNotAllowed(
+  private async buildMethodNotAllowed(
     request: Request,
     env: Env,
     executionCtx: ExecutionContext | undefined,
     routeMiddlewares: Middleware[],
-  ): Response | Promise<Response> {
+  ): Promise<Response> {
     const allMiddlewares = this.mergeMiddlewares(routeMiddlewares);
-    if (allMiddlewares.length === 0) {
-      return new Response("Method Not Allowed", { status: 405 });
-    }
     const ctx = new Context(request, {}, env, executionCtx);
+    if (allMiddlewares.length === 0) {
+      return this.applyCookies(
+        new Response("Method Not Allowed", { status: 405 }),
+        ctx,
+      );
+    }
     const methodNotAllowed: Handler = () =>
       new Response("Method Not Allowed", { status: 405 });
     const composed = this.composeMiddlewares(allMiddlewares, methodNotAllowed);
-    return composed(ctx);
+    const response = await composed(ctx);
+    return this.applyCookies(response, ctx);
   }
 
   private applySecurityHeaders(response: Response): Response {
@@ -412,6 +413,20 @@ export class Rain {
       }
     }
     if (!modified) return response;
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  }
+
+  private applyCookies(response: Response, ctx: Context): Response {
+    const pending = ctx.getPendingCookies();
+    if (pending.length === 0) return response;
+    const headers = new Headers(response.headers);
+    for (const cookie of pending) {
+      headers.append("Set-Cookie", cookie);
+    }
     return new Response(response.body, {
       status: response.status,
       statusText: response.statusText,

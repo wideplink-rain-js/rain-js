@@ -43,3 +43,7 @@ export type ErrorHandler = (
   error: unknown,
   req: Request,
 ) => Response | Promise<Response>;
+
+export interface Schema<T> {
+  parse(data: unknown): T;
+}
