@@ -268,6 +268,12 @@ export class Rain {
         );
       }
 
+      const assetResponse = await this.tryServeStaticAsset(
+        request,
+        env,
+      );
+      if (assetResponse) return assetResponse;
+
       return new Response("Not Found", { status: 404 });
     } catch (error) {
       return this.handleError(error, request, pathname);
@@ -489,5 +495,27 @@ export class Rain {
       error,
     );
     return new Response("Internal Server Error", { status: 500 });
+  }
+
+  private async tryServeStaticAsset(
+    request: Request,
+    env: Env,
+  ): Promise<Response | null> {
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      return null;
+    }
+    if (!env.ASSETS) return null;
+    try {
+      const response = await env.ASSETS.fetch(request);
+      if (response.status === 404) return null;
+      return response;
+    } catch (error) {
+      console.error(
+        "[Rain] Static asset fetch failed.",
+        "Check the [assets] configuration in wrangler.toml.",
+        error,
+      );
+      return null;
+    }
   }
 }
