@@ -533,6 +533,36 @@ function processPages(
   }
 }
 
+function validateCompatibilityFlags() {
+  const wranglerPath = path.join(PROJECT_ROOT, "wrangler.toml");
+  if (!fs.existsSync(wranglerPath)) return;
+
+  const content = fs.readFileSync(wranglerPath, "utf-8");
+  const flagsMatch = content.match(
+    /compatibility_flags\s*=\s*\[([^\]]*)\]/,
+  );
+  const flags = flagsMatch
+    ? (flagsMatch[1].match(/"([^"]+)"/g) || []).map((s) =>
+        s.replace(/"/g, ""),
+      )
+    : [];
+
+  if (!(flags.includes("nodejs_compat") || flags.includes("nodejs_als"))) {
+    console.error(
+      "[Rain] Error: Missing required compatibility flag.\n" +
+        '  → Rain.js requires "nodejs_compat" in your wrangler.toml.\n' +
+        "  → Add the following to your wrangler.toml:\n\n" +
+        '    compatibility_flags = ["nodejs_compat"]\n\n' +
+        "  → Without this flag, the Workers runtime will fail with:\n" +
+        '    "No such module node:async_hooks"\n' +
+        "  → See: https://developers.cloudflare.com/workers/" +
+        "configuration/compatibility-flags/" +
+        "#nodejs-compatibility-flag",
+    );
+    process.exit(1);
+  }
+}
+
 function generate() {
   if (!fs.existsSync(ROUTES_DIR)) {
     console.error(
@@ -543,6 +573,8 @@ function generate() {
     );
     process.exit(1);
   }
+
+  validateCompatibilityFlags();
 
   try {
     execSync("npx wrangler types", {
