@@ -120,4 +120,78 @@ describe("renderToString", () => {
     });
     expect(renderToString(el)).toBe('<div id="test"></div>');
   });
+
+  it("does not escape text inside script tags", () => {
+    const el = createElement(
+      "script",
+      null,
+      "const fn = (x) => x + 1;",
+    );
+    expect(renderToString(el)).toBe(
+      "<script>const fn = (x) => x + 1;</script>",
+    );
+  });
+
+  it("does not escape text inside style tags", () => {
+    const el = createElement(
+      "style",
+      null,
+      "div > p { color: red; }",
+    );
+    expect(renderToString(el)).toBe(
+      "<style>div > p { color: red; }</style>",
+    );
+  });
+
+  it("renders script with attributes", () => {
+    const el = createElement(
+      "script",
+      { type: "module" },
+      'import { foo } from "./bar.js";',
+    );
+    expect(renderToString(el)).toBe(
+      '<script type="module">import { foo } from "./bar.js";</script>',
+    );
+  });
+
+  it("sanitizes closing tag injection in script", () => {
+    const el = createElement(
+      "script",
+      null,
+      '</script><script>alert(1)</script><script>',
+    );
+    expect(renderToString(el)).not.toContain("</script><script>");
+    expect(renderToString(el)).toBe(
+      "<script><\\/script><script>alert(1)<\\/script><script></script>",
+    );
+  });
+
+  it("sanitizes closing tag injection in style", () => {
+    const el = createElement(
+      "style",
+      null,
+      "</style><script>alert(1)</script><style>",
+    );
+    expect(renderToString(el)).not.toContain("</style><script>");
+    expect(renderToString(el)).toBe(
+      "<style><\\/style><script>alert(1)</script><style></style>",
+    );
+  });
+
+  it("handles template literals in script", () => {
+    const code = `
+  const fn = (x) => x + 1;
+  const s = 'hello';
+  if (x > 0 && y < 10) {}
+`;
+    const el = createElement("script", null, code);
+    expect(renderToString(el)).toBe(`<script>${code}</script>`);
+  });
+
+  it("still escapes text in normal elements", () => {
+    const el = createElement("div", null, "<script>alert(1)</script>");
+    expect(renderToString(el)).toBe(
+      "<div>&lt;script&gt;alert(1)&lt;/script&gt;</div>",
+    );
+  });
 });

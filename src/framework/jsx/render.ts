@@ -2,6 +2,8 @@ import { Fragment } from "./createElement";
 import { escapeHtml } from "./escape";
 import { RAIN_ELEMENT, type RainElement, type RainNode } from "./types";
 
+const RAW_TEXT_ELEMENTS = new Set(["script", "style"]);
+
 const VOID_ELEMENTS = new Set([
   "area",
   "base",
@@ -96,6 +98,25 @@ export function isRainElement(value: unknown): value is RainElement {
   );
 }
 
+function renderRawChildren(tag: string, children: RainNode[]): string {
+  const parts: string[] = [];
+  const closeRe = new RegExp(`</${tag}`, "gi");
+  for (const child of children) {
+    if (child === null || child === undefined) continue;
+    if (typeof child === "boolean") continue;
+    if (Array.isArray(child)) {
+      parts.push(renderRawChildren(tag, child));
+      continue;
+    }
+    if (isRainElement(child)) {
+      parts.push(renderElement(child));
+      continue;
+    }
+    parts.push(String(child).replace(closeRe, `<\\/${tag}`));
+  }
+  return parts.join("");
+}
+
 function renderChildren(children: RainNode[]): string {
   const parts: string[] = [];
   for (const child of children) {
@@ -140,6 +161,11 @@ function renderElement(element: RainElement): string {
 
   if (dangerousHtml) {
     return `<${tag}${attrs}>${dangerousHtml.__html}</${tag}>`;
+  }
+
+  if (RAW_TEXT_ELEMENTS.has(tag)) {
+    const raw = renderRawChildren(tag, children);
+    return `<${tag}${attrs}>${raw}</${tag}>`;
   }
 
   const inner = renderChildren(children);
