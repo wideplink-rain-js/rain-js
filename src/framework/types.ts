@@ -17,6 +17,7 @@ export function defineKey<T>(id: string): StateKey<T> {
 export interface RainConfig {
   routesDir?: string;
   outDir?: string;
+  frameworkPackage?: string;
   csrf?: boolean;
   securityHeaders?: Record<string, string> | false;
 }

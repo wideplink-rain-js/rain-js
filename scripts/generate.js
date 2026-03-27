@@ -27,7 +27,11 @@ function extractStringProps(obj, sourceFile, keys) {
 
 function loadBuildConfig() {
   const configPath = path.join(PROJECT_ROOT, "rain.config.ts");
-  const defaults = { routesDir: "src/routes", outDir: ".rainjs" };
+  const defaults = {
+    routesDir: "src/routes",
+    outDir: ".rainjs",
+    frameworkPackage: "@rainfw/core",
+  };
   if (!fs.existsSync(configPath)) return defaults;
 
   const content = fs.readFileSync(configPath, "utf-8");
@@ -46,7 +50,11 @@ function loadBuildConfig() {
     if (!ts.isObjectLiteralExpression(obj)) return;
     Object.assign(
       config,
-      extractStringProps(obj, sourceFile, ["routesDir", "outDir"]),
+      extractStringProps(obj, sourceFile, [
+        "routesDir",
+        "outDir",
+        "frameworkPackage",
+      ]),
     );
   });
 
@@ -625,11 +633,13 @@ function generate() {
   );
 
   const hasConfig = fs.existsSync(CONFIG_FILE);
-  const frameworkPath = relativeImportPath(
-    path.join(PROJECT_ROOT, "src", "framework"),
-  );
+  const fwPkg = BUILD_CONFIG.frameworkPackage;
+  const frameworkImport =
+    fwPkg.startsWith(".") || fwPkg.startsWith("/")
+      ? relativeImportPath(path.join(PROJECT_ROOT, fwPkg))
+      : fwPkg;
 
-  const headerImports = [`import { Rain } from "${frameworkPath}";`];
+  const headerImports = [`import { Rain } from "${frameworkImport}";`];
   if (hasConfig) {
     const configPath = relativeImportPath(
       path.join(PROJECT_ROOT, "rain.config"),

@@ -69,4 +69,21 @@ describe("db()", () => {
     const result = db(fakeD1);
     expect(result).toBe(fakeDrizzleResult);
   });
+
+  it("options.schema を渡した場合、drizzle に schema が渡される", () => {
+    const fakeD1 = { fake: "d1" } as unknown as D1Database;
+    const fakeSchema = { users: {} } as Record<string, unknown>;
+    mockedBindings.mockReturnValue({ DB: fakeD1 } as unknown as Env);
+    db({ schema: fakeSchema });
+    expect(mockedDrizzle).toHaveBeenCalledWith(fakeD1, {
+      schema: fakeSchema,
+    });
+  });
+
+  it("options.d1 を渡した場合、bindings を使わない", () => {
+    const fakeD1 = { fake: "d1" } as unknown as D1Database;
+    db({ d1: fakeD1 });
+    expect(mockedDrizzle).toHaveBeenCalledWith(fakeD1);
+    expect(mockedBindings).not.toHaveBeenCalled();
+  });
 });
