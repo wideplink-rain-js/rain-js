@@ -31,7 +31,7 @@ function printHelp() {
 }
 
 function printVersion() {
-  console.log(`rain-js v${pkg.version}`);
+  console.log(`@rainfw/core v${pkg.version}`);
 }
 
 if (!command || command === "--help" || command === "-h") {

@@ -24,11 +24,11 @@
 
     /* JSX */
     "jsx": "react-jsx",
-    "jsxImportSource": "rain-js",
+    "jsxImportSource": "@rainfw/core",
 
     /* パス解決 */
     "paths": {
-      "rain-js/jsx-runtime": ["./src/framework/jsx-runtime.ts"]
+      "@rainfw/core/jsx-runtime": ["./src/framework/jsx-runtime.ts"]
     },
 
     /* 出力 */

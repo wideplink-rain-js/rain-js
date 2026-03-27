@@ -1,4 +1,4 @@
-import type { JSX } from "rain-js/jsx-runtime";
+import type { JSX } from "@rainfw/core/jsx-runtime";
 import type { Context } from "../framework/context";
 import type { RainElement } from "../framework/jsx/types";
 

@@ -1,8 +1,7 @@
 {
-  "name": "rain-js",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "@rainfw/core",
+  "version": "0.1.0",
+  "description": "A TypeScript web framework for Cloudflare Workers",
   "bin": {
     "rainjs": "./cli/index.js"
   },
@@ -18,23 +17,45 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:generate": "node --test tests/generate.test.js",
-    "bench": "node scripts/bench.js"
+    "bench": "node scripts/bench.js",
+    "build:pkg": "tsc -p tsconfig.build.json && node -e \"require('fs').writeFileSync('dist/package.json',JSON.stringify({type:'module'}))\"",
+    "prepublishOnly": "npm run build:pkg"
   },
-  "keywords": [],
+  "keywords": [
+    "cloudflare-workers",
+    "web-framework",
+    "typescript",
+    "file-based-routing",
+    "jsx"
+  ],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "commonjs",
   "peerDependencies": {
-    "drizzle-orm": ">=0.40.0"
+    "drizzle-orm": ">=0.40.0",
+    "typescript": ">=5.0.0"
   },
   "peerDependenciesMeta": {
     "drizzle-orm": {
       "optional": true
+    },
+    "typescript": {
+      "optional": false
     }
   },
   "exports": {
-    "./jsx-runtime": "./src/framework/jsx-runtime.ts",
-    "./db": "./src/framework/db.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./jsx-runtime": {
+      "types": "./dist/jsx-runtime.d.ts",
+      "import": "./dist/jsx-runtime.js"
+    },
+    "./db": {
+      "types": "./dist/db.d.ts",
+      "import": "./dist/db.js"
+    }
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.8",
@@ -45,5 +66,16 @@
     "typescript": "^5.9.3",
     "vitest": "^4.1.1",
     "wrangler": "^4.76.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rainfw/core.git"
+  },
+  "homepage": "https://github.com/rainfw/core",
+  "files": [
+    "dist/",
+    "cli/",
+    "scripts/dev.js",
+    "scripts/generate.js"
+  ]
 }

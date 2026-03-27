@@ -519,9 +519,10 @@ export class Rain {
     if (request.method !== "GET" && request.method !== "HEAD") {
       return null;
     }
-    if (!env.ASSETS) return null;
+    const assets = (env as Env & { ASSETS?: Fetcher }).ASSETS;
+    if (!assets) return null;
     try {
-      const response = await env.ASSETS.fetch(request);
+      const response = await assets.fetch(request);
       if (response.status === 404) return null;
       return response;
     } catch (error) {

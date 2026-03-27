@@ -4,4 +4,5 @@ node_modules/
 docs/
 .vscode/
 .github/agents/*
-.github/copilot-instructions.md
+.github/copilot-instructions.mddist/
+dist/*
