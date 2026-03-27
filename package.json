@@ -13,6 +13,7 @@
     "format": "biome format --write .",
     "check": "biome check --write .",
     "typecheck": "tsc --noEmit",
+    "typecheck:db": "tsc --noEmit -p tsconfig.db.json",
     "ci": "biome ci . && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -23,13 +24,24 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "peerDependencies": {
+    "drizzle-orm": ">=0.40.0"
+  },
+  "peerDependenciesMeta": {
+    "drizzle-orm": {
+      "optional": true
+    }
+  },
   "exports": {
-    "./jsx-runtime": "./src/framework/jsx-runtime.ts"
+    "./jsx-runtime": "./src/framework/jsx-runtime.ts",
+    "./db": "./src/framework/db.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.8",
     "@cloudflare/workers-types": "^4.20260317.1",
     "@types/node": "^25.5.0",
+    "drizzle-kit": "^0.31.10",
+    "drizzle-orm": "^0.45.2",
     "typescript": "^5.9.3",
     "vitest": "^4.1.1",
     "wrangler": "^4.76.0"

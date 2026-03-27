@@ -43,5 +43,5 @@
     "rain.config.ts",
     "worker-configuration.d.ts"
   ],
-  "exclude": ["node_modules", "scripts"]
+  "exclude": ["node_modules", "scripts", "src/framework/db.ts"]
 }

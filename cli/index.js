@@ -4,11 +4,13 @@ const path = require("node:path");
 const fs = require("node:fs");
 const { spawn } = require("node:child_process");
 
+const { stripControlChars } = require("./utils/sanitize");
+
 const PACKAGE_JSON = path.join(__dirname, "..", "package.json");
 const pkg = JSON.parse(fs.readFileSync(PACKAGE_JSON, "utf-8"));
 
 const command = process.argv[2];
-const VALID_COMMANDS = ["dev", "build", "routes"];
+const VALID_COMMANDS = ["dev", "build", "routes", "db"];
 
 function printHelp() {
   console.log(`
@@ -20,6 +22,7 @@ function printHelp() {
     dev      Start development server (codegen + watch + wrangler dev)
     build    Run code generation only
     routes   Display registered routes
+    db       D1 database management (init, generate, push, migrate, apply-local, studio)
 
   Options:
     --help, -h     Show this help message
@@ -43,11 +46,17 @@ if (command === "--version" || command === "-v") {
 
 if (!VALID_COMMANDS.includes(command)) {
   console.error(
-    `[Rain] Error: Unknown command "${command}".\n` +
+    `[Rain] Error: Unknown command "${stripControlChars(command)}".\n` +
       `  → Available commands: ${VALID_COMMANDS.join(", ")}\n` +
       "  → Run \"rainjs --help\" for usage information.",
   );
   process.exit(1);
+}
+
+if (command === "db") {
+  const { handleDbCommand } = require("./commands/db");
+  handleDbCommand(process.argv[3]);
+  process.exit(0);
 }
 
 if (command === "build") {
