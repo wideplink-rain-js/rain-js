@@ -271,6 +271,13 @@ function bundleClientFilesSync(clientFiles, srcDir) {
   return scripts;
 }
 
+function stripRouteGroupSegments(filePath) {
+  return filePath
+    .split("/")
+    .filter((segment) => !/^\(.+\)$/.test(segment))
+    .join("/");
+}
+
 function routePathToDir(filePath) {
   return filePath
     .replace(/\\/g, "/")
@@ -285,6 +292,7 @@ function middlewareImportName(filePath) {
     .replace(/\//g, "_")
     .replace(/\[/g, "$")
     .replace(/\]/g, "")
+    .replace(/[()]/g, "")
     .replace(/-/g, "_")
     .replace(/_+$/, "");
   return `mw_${base || "root"}`;
@@ -307,6 +315,7 @@ function layoutPathToDir(filePath) {
 function pageFilePathToUrlPath(filePath) {
   let urlPath = filePath.replace(/\.tsx?$/, "");
   urlPath = urlPath.replace(/\\/g, "/");
+  urlPath = stripRouteGroupSegments(urlPath);
   urlPath = urlPath.replace(/\[([^\]]+)\]/g, ":$1");
   urlPath = urlPath.replace(/\/page$/, "");
   if (urlPath === "page") urlPath = "";
@@ -322,6 +331,7 @@ function pageFilePathToImportName(filePath) {
       .replace(/\//g, "_")
       .replace(/\[/g, "$")
       .replace(/\]/g, "")
+      .replace(/[()]/g, "")
       .replace(/-/g, "_")
   );
 }
@@ -333,6 +343,7 @@ function layoutImportName(filePath) {
     .replace(/\//g, "_")
     .replace(/\[/g, "$")
     .replace(/\]/g, "")
+    .replace(/[()]/g, "")
     .replace(/-/g, "_")
     .replace(/_+$/, "");
   return `layout_${base || "root"}`;
@@ -402,6 +413,63 @@ function validateNoPageRouteColocation(routeFiles, pageFiles) {
     }
   }
 
+  const routeUrlMap = new Map();
+  for (const f of routeFiles) {
+    routeUrlMap.set(filePathToUrlPath(f), f);
+  }
+  for (const pageFile of pageFiles) {
+    const url = pageFilePathToUrlPath(pageFile);
+    const conflicting = routeUrlMap.get(url);
+    if (conflicting) {
+      const pageDir = pageFilePathToDir(pageFile);
+      if (!routeDirs.has(pageDir)) {
+        errors.push(
+          `[Rain] Error: page "${pageFile}" and route "${conflicting}" resolve to the same URL path "${url}":\n` +
+            "  → This conflict occurs because route group folders are stripped from URLs.\n" +
+            "  → Move one of them to a different URL path.",
+        );
+      }
+    }
+  }
+
+  return errors;
+}
+
+function validateNoDuplicateUrls(routeFiles, pageFiles) {
+  const errors = [];
+
+  const routeUrlMap = new Map();
+  for (const f of routeFiles) {
+    const url = filePathToUrlPath(f);
+    if (routeUrlMap.has(url)) {
+      errors.push(
+        `[Rain] Error: multiple route files resolve to the same URL path "${url}":\n` +
+          `  → ${routeUrlMap.get(url)}\n` +
+          `  → ${f}\n` +
+          "  → Route group folders are stripped from URLs.\n" +
+          "  → Rename one of the routes to avoid the conflict.",
+      );
+    } else {
+      routeUrlMap.set(url, f);
+    }
+  }
+
+  const pageUrlMap = new Map();
+  for (const f of pageFiles) {
+    const url = pageFilePathToUrlPath(f);
+    if (pageUrlMap.has(url)) {
+      errors.push(
+        `[Rain] Error: multiple page files resolve to the same URL path "${url}":\n` +
+          `  → ${pageUrlMap.get(url)}\n` +
+          `  → ${f}\n` +
+          "  → Route group folders are stripped from URLs.\n" +
+          "  → Rename one of the pages to avoid the conflict.",
+      );
+    } else {
+      pageUrlMap.set(url, f);
+    }
+  }
+
   return errors;
 }
 
@@ -429,6 +497,7 @@ function getMiddlewaresForRoute(routeFile, middlewareFiles) {
 function filePathToUrlPath(filePath) {
   let urlPath = filePath.replace(/\.tsx?$/, "");
   urlPath = urlPath.replace(/\\/g, "/");
+  urlPath = stripRouteGroupSegments(urlPath);
   urlPath = urlPath.replace(/\[([^\]]+)\]/g, ":$1");
   urlPath = urlPath.replace(/\/route$/, "");
   if (urlPath === "route") urlPath = "";
@@ -444,6 +513,7 @@ function filePathToImportName(filePath) {
       .replace(/\//g, "_")
       .replace(/\[/g, "$")
       .replace(/\]/g, "")
+      .replace(/[()]/g, "")
       .replace(/-/g, "_")
   );
 }
@@ -750,6 +820,12 @@ function generate() {
     process.exit(1);
   }
 
+  const duplicateErrors = validateNoDuplicateUrls(files, pageFiles);
+  for (const err of duplicateErrors) {
+    console.error(err);
+    process.exit(1);
+  }
+
   const hasRootLayout = layoutFiles.some((f) => layoutPathToDir(f) === "");
 
   processMiddlewares(middlewareFiles, imports);
@@ -832,6 +908,8 @@ module.exports = {
   detectUseClientDirective,
   bundleClientFilesSync,
   validateNoPageRouteColocation,
+  validateNoDuplicateUrls,
+  stripRouteGroupSegments,
   ROUTES_DIR,
   ENTRY_FILE,
   HTTP_METHODS,

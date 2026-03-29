@@ -14,6 +14,8 @@ const {
   getLayoutsForPage,
   detectDefaultExportFromContent,
   validateNoPageRouteColocation,
+  validateNoDuplicateUrls,
+  stripRouteGroupSegments,
 } = require("../scripts/generate");
 
 describe("filePathToUrlPath", () => {
@@ -438,6 +440,267 @@ describe("validateNoPageRouteColocation", () => {
     const errors = validateNoPageRouteColocation(
       ["api/route.ts", "user/route.ts"],
       ["hello/page.tsx", "about/page.tsx"],
+    );
+    assert.deepStrictEqual(errors, []);
+  });
+
+  it("detects URL-level conflict across route groups", () => {
+    const errors = validateNoPageRouteColocation(
+      ["(api)/users/route.ts"],
+      ["(pages)/users/page.tsx"],
+    );
+    assert.strictEqual(errors.length, 1);
+    assert.ok(errors[0].includes("resolve to the same URL path"));
+  });
+
+  it("allows route groups with different URLs", () => {
+    const errors = validateNoPageRouteColocation(
+      ["(api)/data/route.ts"],
+      ["(pages)/home/page.tsx"],
+    );
+    assert.deepStrictEqual(errors, []);
+  });
+});
+
+describe("stripRouteGroupSegments", () => {
+  it("strips single route group", () => {
+    assert.strictEqual(
+      stripRouteGroupSegments("(admin)/users/route"),
+      "users/route",
+    );
+  });
+
+  it("strips multiple route groups", () => {
+    assert.strictEqual(
+      stripRouteGroupSegments("(admin)/(settings)/profile/page"),
+      "profile/page",
+    );
+  });
+
+  it("strips nested route group", () => {
+    assert.strictEqual(
+      stripRouteGroupSegments("users/(admin)/route"),
+      "users/route",
+    );
+  });
+
+  it("preserves path without route groups", () => {
+    assert.strictEqual(stripRouteGroupSegments("users/route"), "users/route");
+  });
+
+  it("preserves dynamic segments", () => {
+    assert.strictEqual(
+      stripRouteGroupSegments("(admin)/users/[id]/route"),
+      "users/[id]/route",
+    );
+  });
+
+  it("returns filename when only group prefix", () => {
+    assert.strictEqual(stripRouteGroupSegments("(group)/route"), "route");
+  });
+
+  it("does not strip partial parens", () => {
+    assert.strictEqual(
+      stripRouteGroupSegments("(broken/route"),
+      "(broken/route",
+    );
+  });
+});
+
+describe("filePathToUrlPath (route groups)", () => {
+  it("strips route group from path", () => {
+    assert.strictEqual(filePathToUrlPath("(api)/users/route.ts"), "/users");
+  });
+
+  it("strips nested route groups", () => {
+    assert.strictEqual(
+      filePathToUrlPath("(api)/(v1)/users/route.ts"),
+      "/users",
+    );
+  });
+
+  it("strips group at root level", () => {
+    assert.strictEqual(filePathToUrlPath("(api)/route.ts"), "/");
+  });
+
+  it("preserves dynamic segments with groups", () => {
+    assert.strictEqual(
+      filePathToUrlPath("(api)/user/[id]/route.ts"),
+      "/user/:id",
+    );
+  });
+
+  it("strips mid-path group", () => {
+    assert.strictEqual(
+      filePathToUrlPath("user/(admin)/[id]/route.ts"),
+      "/user/:id",
+    );
+  });
+});
+
+describe("pageFilePathToUrlPath (route groups)", () => {
+  it("strips route group from page path", () => {
+    assert.strictEqual(
+      pageFilePathToUrlPath("(pages)/hello/page.tsx"),
+      "/hello",
+    );
+  });
+
+  it("strips group at root level", () => {
+    assert.strictEqual(pageFilePathToUrlPath("(marketing)/page.tsx"), "/");
+  });
+
+  it("strips nested groups", () => {
+    assert.strictEqual(
+      pageFilePathToUrlPath("(admin)/(settings)/profile/page.tsx"),
+      "/profile",
+    );
+  });
+});
+
+describe("filePathToImportName (route groups)", () => {
+  it("strips parens from import name", () => {
+    assert.strictEqual(
+      filePathToImportName("(api)/users/route.ts"),
+      "route_api_users_route",
+    );
+  });
+
+  it("handles nested groups", () => {
+    assert.strictEqual(
+      filePathToImportName("(api)/(v1)/users/route.ts"),
+      "route_api_v1_users_route",
+    );
+  });
+});
+
+describe("pageFilePathToImportName (route groups)", () => {
+  it("strips parens from page import name", () => {
+    assert.strictEqual(
+      pageFilePathToImportName("(pages)/hello/page.tsx"),
+      "page_pages_hello_page",
+    );
+  });
+});
+
+describe("middlewareImportName (route groups)", () => {
+  it("strips parens from middleware name", () => {
+    assert.strictEqual(
+      middlewareImportName("(admin)/_middleware.ts"),
+      "mw_admin",
+    );
+  });
+
+  it("handles nested group path", () => {
+    assert.strictEqual(
+      middlewareImportName("(admin)/settings/_middleware.ts"),
+      "mw_admin_settings",
+    );
+  });
+});
+
+describe("layoutImportName (route groups)", () => {
+  it("strips parens from layout name", () => {
+    assert.strictEqual(layoutImportName("(admin)/layout.tsx"), "layout_admin");
+  });
+
+  it("handles nested group path", () => {
+    assert.strictEqual(
+      layoutImportName("(admin)/settings/layout.tsx"),
+      "layout_admin_settings",
+    );
+  });
+});
+
+describe("getMiddlewaresForRoute (route groups)", () => {
+  it("matches middleware within same group", () => {
+    const result = getMiddlewaresForRoute("(admin)/users/route.ts", [
+      "(admin)/_middleware.ts",
+    ]);
+    assert.deepStrictEqual(result, ["(admin)/_middleware.ts"]);
+  });
+
+  it("does not match middleware from different group", () => {
+    const result = getMiddlewaresForRoute("(public)/home/route.ts", [
+      "(admin)/_middleware.ts",
+    ]);
+    assert.deepStrictEqual(result, []);
+  });
+
+  it("matches root middleware for grouped routes", () => {
+    const result = getMiddlewaresForRoute("(admin)/users/route.ts", [
+      "_middleware.ts",
+    ]);
+    assert.deepStrictEqual(result, ["_middleware.ts"]);
+  });
+
+  it("matches root and group middleware in order", () => {
+    const result = getMiddlewaresForRoute("(admin)/users/route.ts", [
+      "_middleware.ts",
+      "(admin)/_middleware.ts",
+    ]);
+    assert.deepStrictEqual(result, [
+      "_middleware.ts",
+      "(admin)/_middleware.ts",
+    ]);
+  });
+});
+
+describe("getLayoutsForPage (route groups)", () => {
+  it("matches layout within same group", () => {
+    const result = getLayoutsForPage("(admin)/dashboard/page.tsx", [
+      "(admin)/layout.tsx",
+    ]);
+    assert.deepStrictEqual(result, ["(admin)/layout.tsx"]);
+  });
+
+  it("does not match layout from different group", () => {
+    const result = getLayoutsForPage("(public)/home/page.tsx", [
+      "(admin)/layout.tsx",
+    ]);
+    assert.deepStrictEqual(result, []);
+  });
+
+  it("matches root and group layout in order", () => {
+    const result = getLayoutsForPage("(admin)/dashboard/page.tsx", [
+      "layout.tsx",
+      "(admin)/layout.tsx",
+    ]);
+    assert.deepStrictEqual(result, ["layout.tsx", "(admin)/layout.tsx"]);
+  });
+});
+
+describe("validateNoDuplicateUrls", () => {
+  it("returns empty for unique URLs", () => {
+    const errors = validateNoDuplicateUrls(
+      ["(api)/users/route.ts", "(api)/posts/route.ts"],
+      ["(pages)/home/page.tsx", "(pages)/about/page.tsx"],
+    );
+    assert.deepStrictEqual(errors, []);
+  });
+
+  it("detects duplicate route URLs across groups", () => {
+    const errors = validateNoDuplicateUrls(
+      ["(api)/users/route.ts", "(admin)/users/route.ts"],
+      [],
+    );
+    assert.strictEqual(errors.length, 1);
+    assert.ok(errors[0].includes("multiple route files"));
+  });
+
+  it("detects duplicate page URLs across groups", () => {
+    const errors = validateNoDuplicateUrls(
+      [],
+      ["(admin)/dashboard/page.tsx", "(public)/dashboard/page.tsx"],
+    );
+    assert.strictEqual(errors.length, 1);
+    assert.ok(errors[0].includes("multiple page files"));
+  });
+
+  it("allows same URL in route and page (caught by colocation)", () => {
+    const errors = validateNoDuplicateUrls(
+      ["(api)/users/route.ts"],
+      ["(pages)/users/page.tsx"],
     );
     assert.deepStrictEqual(errors, []);
   });
