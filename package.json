@@ -1,6 +1,6 @@
 {
   "name": "@rainfw/core",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "A TypeScript web framework for Cloudflare Workers",
   "bin": {
     "rainjs": "./cli/index.js"
@@ -12,6 +12,8 @@
     "format": "biome format --write .",
     "check": "biome check --write .",
     "typecheck": "tsc --noEmit",
+    "typecheck:client": "tsc --noEmit -p tsconfig.client.json",
+    "typecheck:compiler": "tsc --noEmit -p tsconfig.compiler.json",
     "typecheck:db": "tsc --noEmit -p tsconfig.db.json",
     "ci": "biome ci . && tsc --noEmit",
     "test": "vitest run",
@@ -63,6 +65,8 @@
     "@types/node": "^25.5.0",
     "drizzle-kit": "^0.31.10",
     "drizzle-orm": "^0.45.2",
+    "esbuild": "^0.27.4",
+    "jsdom": "^29.0.1",
     "typescript": "^5.9.3",
     "vitest": "^4.1.1",
     "wrangler": "^4.76.0"

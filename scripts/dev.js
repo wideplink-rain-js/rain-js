@@ -1,6 +1,9 @@
 const fs = require("node:fs");
+const path = require("node:path");
 const { spawn } = require("node:child_process");
-const { generate, ROUTES_DIR } = require("./generate");
+const { generate, regenerateClient, ROUTES_DIR } = require("./generate");
+
+const SRC_DIR = path.join(process.cwd(), "src");
 
 generate();
 
@@ -41,6 +44,30 @@ try {
   );
 }
 console.log("[watch] Watching src/routes/ for changes...");
+
+let clientDebounceTimer = null;
+try {
+  const clientWatcher = fs.watch(
+    SRC_DIR,
+    { recursive: true },
+    (eventType, filename) => {
+      if (!(filename?.endsWith(".ts") || filename?.endsWith(".tsx"))) return;
+      if (filename.startsWith("routes")) return;
+      clearTimeout(clientDebounceTimer);
+      clientDebounceTimer = setTimeout(() => {
+        console.log(`[watch:client] ${eventType}: ${filename}`);
+        regenerateClient();
+      }, 200);
+    },
+  );
+
+  clientWatcher.on("error", () => {
+    console.error("[Rain] Warning: Client file watcher error.");
+  });
+} catch (_clientWatchError) {
+  console.error("[Rain] Warning: Failed to start client file watcher.");
+}
+console.log("[watch] Watching src/ for client component changes...");
 
 const wrangler = spawn("npx", ["wrangler", "dev"], {
   stdio: "inherit",

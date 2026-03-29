@@ -120,7 +120,7 @@ export class Context {
 
   html(body: RainElement | string, status = 200): Response {
     const htmlString = isRainElement(body)
-      ? renderToString(body)
+      ? renderToString(body).html
       : String(body);
     return new Response(htmlString, {
       status,

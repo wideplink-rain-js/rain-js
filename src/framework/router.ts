@@ -1,7 +1,9 @@
 import { runWithBindings } from "./bindings";
+import type { ScriptDescriptor } from "./compiler/inject";
+import { injectScripts } from "./compiler/inject";
 import { Context } from "./context";
 import { HttpError } from "./errors";
-import { renderToString } from "./jsx";
+import { escapeHtml, renderToString } from "./jsx";
 import type { RainElement } from "./jsx/types";
 import type {
   ErrorHandler,
@@ -11,6 +13,7 @@ import type {
   PageHandler,
   RainConfig,
   RainOptions,
+  ServerActionHandler,
 } from "./types";
 import { escapeRegExp } from "./utils/regexp";
 import { safeDecodeURIComponent } from "./utils/url";
@@ -52,6 +55,8 @@ export class Rain {
   private errorHandler: ErrorHandler | undefined;
   private csrfProtection: boolean;
   private securityHeaders: ReadonlyArray<readonly [string, string]>;
+  private clientScriptDescriptors: ScriptDescriptor[];
+  private actionHandlers: Map<string, ServerActionHandler> = new Map();
 
   constructor(options?: RainConfig | RainOptions) {
     const csrf =
@@ -62,6 +67,10 @@ export class Rain {
     this.securityHeaders = resolveSecurityHeaders(
       (options as RainConfig | undefined)?.securityHeaders,
     );
+    const scripts = (options as RainConfig | undefined)?.clientScripts ?? [];
+    this.clientScriptDescriptors = scripts.map((src) => ({
+      src,
+    }));
   }
 
   use(...middlewares: Middleware[]): void {
@@ -138,6 +147,16 @@ export class Rain {
     this.addRoute("OPTIONS", path, handler, middlewares);
   }
 
+  registerAction(id: string, handler: ServerActionHandler): void {
+    this.actionHandlers.set(id, handler);
+  }
+
+  registerActions(actions: Record<string, ServerActionHandler>): void {
+    for (const [id, handler] of Object.entries(actions)) {
+      this.actionHandlers.set(id, handler);
+    }
+  }
+
   page(
     path: string,
     handler: PageHandler,
@@ -161,8 +180,18 @@ export class Rain {
           );
         }
       }
-      const html = renderToString(content);
-      const body = doctype ? `<!DOCTYPE html>\n${html}` : html;
+      const csrfToken = crypto.randomUUID();
+      const { html, csrfUsed } = renderToString(content, { csrfToken });
+      const raw = doctype ? `<!DOCTYPE html>\n${html}` : html;
+      const body = injectScripts(raw, this.clientScriptDescriptors);
+      if (csrfUsed) {
+        ctx.setCookie("_rain_csrf", csrfToken, {
+          httpOnly: true,
+          secure: true,
+          sameSite: "Strict",
+          path: "/",
+        });
+      }
       return new Response(body, {
         status: 200,
         headers: { "content-type": "text/html; charset=UTF-8" },
@@ -232,6 +261,10 @@ export class Rain {
 
     const { pathname } = new URL(request.url);
     const method = request.method;
+
+    if (method === "POST" && pathname.startsWith("/_rain/action/")) {
+      return this.handleServerAction(pathname, request, env, executionCtx);
+    }
 
     try {
       const result = this.matchRoute(method, pathname);
@@ -379,6 +412,81 @@ export class Rain {
     }
 
     return this.applyCookies(response, ctx);
+  }
+
+  private async handleServerAction(
+    pathname: string,
+    request: Request,
+    env: Env,
+    executionCtx?: ExecutionContext,
+  ): Promise<Response> {
+    const actionId = decodeURIComponent(
+      pathname.slice("/_rain/action/".length),
+    );
+    const handler = this.actionHandlers.get(actionId);
+
+    if (!handler) {
+      return new Response(
+        "[Rain] Server Action '" +
+          escapeHtml(actionId) +
+          "' not found. " +
+          "Ensure the action is registered " +
+          "with app.registerAction().",
+        {
+          status: 404,
+          headers: {
+            "content-type": "text/plain; charset=UTF-8",
+          },
+        },
+      );
+    }
+
+    const ctx = new Context(request, {}, env, executionCtx);
+
+    const actionHandler: Handler = async (actionCtx: Context) => {
+      const formData = await actionCtx.req.formData();
+      this.validateActionCsrf(actionCtx, formData);
+      const result = await handler(actionCtx, formData);
+      if (result) return result;
+      const referer = actionCtx.header("Referer") ?? "/";
+      return actionCtx.redirect(referer, 303);
+    };
+
+    const allMiddlewares =
+      this.globalMiddlewares.length > 0 ? [...this.globalMiddlewares] : [];
+    const composed = this.composeMiddlewares(allMiddlewares, actionHandler);
+
+    try {
+      const response = await composed(ctx);
+      return this.applyCookies(response, ctx);
+    } catch (error) {
+      return this.handleError(error, request, pathname);
+    }
+  }
+
+  private validateActionCsrf(ctx: Context, formData: FormData): void {
+    const formToken = formData.get("_rain_csrf");
+    const cookieToken = ctx.cookie("_rain_csrf");
+    if (!(formToken && cookieToken)) {
+      throw new HttpError(
+        403,
+        "[Rain] Server Action CSRF token missing. " +
+          "Both a form token and a cookie are " +
+          "required. This may indicate a cross-site " +
+          "request forgery attempt. " +
+          "Reload the page and try again.",
+      );
+    }
+    if (formToken !== cookieToken) {
+      throw new HttpError(
+        403,
+        "[Rain] Server Action CSRF token mismatch. " +
+          "The form token does not match the cookie. " +
+          "This may indicate a cross-site request " +
+          "forgery attempt, or the cookie may have " +
+          "expired. Reload the page and try again.",
+      );
+    }
   }
 
   private async buildMethodNotAllowed(

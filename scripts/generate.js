@@ -3,6 +3,13 @@ const path = require("node:path");
 const { execSync } = require("node:child_process");
 const ts = require("typescript");
 
+let esbuild;
+try {
+  esbuild = require("esbuild");
+} catch (_esbuildOptional) {
+  esbuild = null;
+}
+
 const PROJECT_ROOT = process.cwd();
 
 function unwrapExpression(node) {
@@ -164,6 +171,104 @@ function middlewarePathToDir(filePath) {
     .replace(/\\/g, "/")
     .replace(/_middleware\.ts$/, "")
     .replace(/\/$/, "");
+}
+
+function detectUseClientDirective(content) {
+  const sourceFile = ts.createSourceFile(
+    "file.tsx",
+    content,
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const firstStatement = sourceFile.statements[0];
+  if (!firstStatement) return false;
+  return (
+    ts.isExpressionStatement(firstStatement) &&
+    ts.isStringLiteral(firstStatement.expression) &&
+    firstStatement.expression.text === "use client"
+  );
+}
+
+function getClientFiles(dir, base = "") {
+  if (!fs.existsSync(dir)) return [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  const files = [];
+
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    const relativePath = path.join(base, entry.name);
+
+    if (entry.isDirectory()) {
+      if (entry.name === "node_modules" || entry.name === ".rainjs") continue;
+      files.push(...getClientFiles(fullPath, relativePath));
+    } else if (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) {
+      const content = fs.readFileSync(fullPath, "utf-8");
+      if (detectUseClientDirective(content)) {
+        files.push(relativePath);
+      }
+    }
+  }
+
+  return files;
+}
+
+function bundleClientFilesSync(clientFiles, srcDir) {
+  if (clientFiles.length === 0) return [];
+  if (!esbuild) {
+    console.warn(
+      "[Rain] Warning: esbuild not found.\n" +
+        "  → Install esbuild to enable client bundling: npm install -D esbuild\n" +
+        "  → Client-side components will not be bundled.",
+    );
+    return [];
+  }
+
+  const outDir = path.join(PROJECT_ROOT, "public", "_rain");
+  if (!fs.existsSync(outDir)) {
+    fs.mkdirSync(outDir, { recursive: true });
+  }
+
+  for (const file of fs.readdirSync(outDir)) {
+    if (file.startsWith("island-")) {
+      fs.unlinkSync(path.join(outDir, file));
+    }
+  }
+
+  const entryPoints = clientFiles.map((f) => path.join(srcDir, f));
+
+  const result = esbuild.buildSync({
+    entryPoints,
+    outdir: outDir,
+    bundle: true,
+    minify: true,
+    format: "esm",
+    metafile: true,
+    entryNames: "island-[hash]",
+    write: true,
+    treeShaking: true,
+    platform: "browser",
+    target: ["es2022"],
+    jsx: "automatic",
+    jsxImportSource: "@rainfw/core",
+    alias: {
+      "@rainfw/core/jsx-runtime": path.resolve(
+        PROJECT_ROOT,
+        "src/framework/client/jsx-runtime.ts",
+      ),
+    },
+    loader: { ".ts": "ts", ".tsx": "tsx" },
+  });
+
+  const publicDir = path.join(PROJECT_ROOT, "public");
+  const scripts = [];
+  for (const [outPath, meta] of Object.entries(result.metafile.outputs)) {
+    if (meta.entryPoint) {
+      const relPath = path.relative(publicDir, outPath);
+      scripts.push(`/${relPath.replace(/\\/g, "/")}`);
+    }
+  }
+
+  return scripts;
 }
 
 function routePathToDir(filePath) {
@@ -546,13 +651,9 @@ function validateCompatibilityFlags() {
   if (!fs.existsSync(wranglerPath)) return;
 
   const content = fs.readFileSync(wranglerPath, "utf-8");
-  const flagsMatch = content.match(
-    /compatibility_flags\s*=\s*\[([^\]]*)\]/,
-  );
+  const flagsMatch = content.match(/compatibility_flags\s*=\s*\[([^\]]*)\]/);
   const flags = flagsMatch
-    ? (flagsMatch[1].match(/"([^"]+)"/g) || []).map((s) =>
-        s.replace(/"/g, ""),
-      )
+    ? (flagsMatch[1].match(/"([^"]+)"/g) || []).map((s) => s.replace(/"/g, ""))
     : [];
 
   if (!(flags.includes("nodejs_compat") || flags.includes("nodejs_als"))) {
@@ -569,6 +670,37 @@ function validateCompatibilityFlags() {
     );
     process.exit(1);
   }
+}
+
+function buildAppInitLine(clientScripts, hasConfig) {
+  if (hasConfig) {
+    return clientScripts.length > 0
+      ? `const app = new Rain({ ...config, clientScripts: ${JSON.stringify(clientScripts)} });`
+      : "const app = new Rain(config);";
+  }
+  return clientScripts.length > 0
+    ? `const app = new Rain({ clientScripts: ${JSON.stringify(clientScripts)} });`
+    : "const app = new Rain();";
+}
+
+function regenerateClient() {
+  const srcDir = path.join(PROJECT_ROOT, "src");
+  const clientFiles = getClientFiles(srcDir);
+  const clientScripts = bundleClientFilesSync(clientFiles, srcDir);
+
+  if (!fs.existsSync(ENTRY_FILE)) return;
+
+  const content = fs.readFileSync(ENTRY_FILE, "utf-8");
+  const hasConfig = fs.existsSync(CONFIG_FILE);
+  const appInit = buildAppInitLine(clientScripts, hasConfig);
+  const updated = content.replace(/^const app = new Rain\(.*\);$/m, appInit);
+  if (updated !== content) {
+    fs.writeFileSync(ENTRY_FILE, updated);
+  }
+
+  const clientMsg =
+    clientFiles.length > 0 ? `${clientFiles.length} client` : "0 client";
+  console.log(`[gen:client] ${clientMsg} -> .rainjs/entry.ts`);
 }
 
 function generate() {
@@ -632,6 +764,10 @@ function generate() {
     registrations,
   );
 
+  const srcDir = path.join(PROJECT_ROOT, "src");
+  const clientFiles = getClientFiles(srcDir);
+  const clientScripts = bundleClientFilesSync(clientFiles, srcDir);
+
   const hasConfig = fs.existsSync(CONFIG_FILE);
   const fwPkg = BUILD_CONFIG.frameworkPackage;
   const frameworkImport =
@@ -647,9 +783,7 @@ function generate() {
     headerImports.push(`import config from "${configPath}";`);
   }
 
-  const appInit = hasConfig
-    ? "const app = new Rain(config);"
-    : "const app = new Rain();";
+  const appInit = buildAppInitLine(clientScripts, hasConfig);
 
   const content = [
     ...headerImports,
@@ -665,18 +799,22 @@ function generate() {
 
   fs.writeFileSync(ENTRY_FILE, content);
   const total = files.length + pageFiles.length;
+  const clientMsg =
+    clientFiles.length > 0 ? `, ${clientFiles.length} client` : "";
   console.log(
-    `[gen] ${total} route(s) (${files.length} api, ${pageFiles.length} page, ${layoutFiles.length} layout) -> .rainjs/entry.ts`,
+    `[gen] ${total} route(s) (${files.length} api, ${pageFiles.length} page, ${layoutFiles.length} layout${clientMsg}) -> .rainjs/entry.ts`,
   );
 }
 
 module.exports = {
   generate,
+  regenerateClient,
   loadBuildConfig,
   getRouteFiles,
   getMiddlewareFiles,
   getPageFiles,
   getLayoutFiles,
+  getClientFiles,
   getMiddlewaresForRoute,
   getLayoutsForPage,
   filePathToUrlPath,
@@ -691,6 +829,8 @@ module.exports = {
   detectMiddlewareExportFromContent,
   detectDefaultExport,
   detectDefaultExportFromContent,
+  detectUseClientDirective,
+  bundleClientFilesSync,
   validateNoPageRouteColocation,
   ROUTES_DIR,
   ENTRY_FILE,

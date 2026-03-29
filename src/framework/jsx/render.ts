@@ -1,6 +1,13 @@
 import { Fragment } from "./createElement";
 import { escapeHtml } from "./escape";
-import { RAIN_ELEMENT, type RainElement, type RainNode } from "./types";
+import {
+  RAIN_ELEMENT,
+  RAIN_ISLAND,
+  RAIN_SERVER_ACTION,
+  type RainComponent,
+  type RainElement,
+  type RainNode,
+} from "./types";
 
 const RAW_TEXT_ELEMENTS = new Set(["script", "style"]);
 
@@ -98,18 +105,87 @@ export function isRainElement(value: unknown): value is RainElement {
   );
 }
 
-function renderRawChildren(tag: string, children: RainNode[]): string {
+export interface RenderResult {
+  html: string;
+  csrfUsed: boolean;
+}
+
+interface RenderContext {
+  islandCounter: number;
+  csrf: { token: string; used: boolean } | null;
+}
+
+function serializeIslandProps(props: Record<string, unknown>): string {
+  const safe: Record<string, unknown> = {};
+  for (const key of Object.keys(props)) {
+    if (key === "children") continue;
+    const value = props[key];
+    if (typeof value === "function") continue;
+    if (typeof value === "symbol") continue;
+    safe[key] = value;
+  }
+  return JSON.stringify(safe);
+}
+
+function escapeScriptJson(json: string): string {
+  return json.replace(/<\/(script)/gi, "<\\/$1");
+}
+
+function renderIsland(
+  tag: RainComponent,
+  props: Record<string, unknown>,
+  children: RainNode[],
+  islandId: string,
+  ctx: RenderContext,
+): string {
+  const index = ctx.islandCounter++;
+  const result = tag({ ...props, children });
+  const innerHtml =
+    result === null
+      ? ""
+      : typeof result === "string"
+        ? escapeHtml(result)
+        : renderElement(result, ctx);
+  let json: string;
+  try {
+    json = escapeScriptJson(serializeIslandProps(props));
+  } catch (cause) {
+    throw new Error(
+      `[Rain] Island "${islandId}" の props を` +
+        "シリアライズできませんでした。" +
+        "循環参照や BigInt を含む props は" +
+        "渡せません。該当する props を確認して" +
+        "ください。",
+      { cause },
+    );
+  }
+  return (
+    `<!--$rain-island:${index}:${islandId}-->` +
+    innerHtml +
+    `<script type="application/json"` +
+    ` data-rain-props="${index}">` +
+    json +
+    `</script>` +
+    `<!--/$rain-island:${index}-->`
+  );
+}
+
+function renderRawChildren(
+  tag: string,
+  children: RainNode[],
+  ctx: RenderContext,
+): string {
   const parts: string[] = [];
   const closeRe = new RegExp(`</${tag}`, "gi");
   for (const child of children) {
     if (child === null || child === undefined) continue;
     if (typeof child === "boolean") continue;
     if (Array.isArray(child)) {
-      parts.push(renderRawChildren(tag, child));
+      parts.push(renderRawChildren(tag, child, ctx));
       continue;
     }
     if (isRainElement(child)) {
-      parts.push(renderElement(child));
+      parts.push(renderElement(child, ctx));
       continue;
     }
     parts.push(String(child).replace(closeRe, `<\\/${tag}`));
@@ -117,17 +193,17 @@ function renderRawChildren(tag: string, children: RainNode[]): string {
   return parts.join("");
 }
 
-function renderChildren(children: RainNode[]): string {
+function renderChildren(children: RainNode[], ctx: RenderContext): string {
   const parts: string[] = [];
   for (const child of children) {
     if (child === null || child === undefined) continue;
     if (typeof child === "boolean") continue;
     if (Array.isArray(child)) {
-      parts.push(renderChildren(child));
+      parts.push(renderChildren(child, ctx));
       continue;
     }
     if (isRainElement(child)) {
-      parts.push(renderElement(child));
+      parts.push(renderElement(child, ctx));
       continue;
     }
     parts.push(escapeHtml(String(child)));
@@ -135,17 +211,66 @@ function renderChildren(children: RainNode[]): string {
   return parts.join("");
 }
 
-function renderElement(element: RainElement): string {
+function isServerActionFn(value: unknown): value is Record<symbol, string> {
+  return typeof value === "function" && RAIN_SERVER_ACTION in (value as object);
+}
+
+function renderServerActionForm(
+  props: Record<string, unknown>,
+  children: RainNode[],
+  ctx: RenderContext,
+): string {
+  const actionId = (props["action"] as Record<symbol, unknown>)[
+    RAIN_SERVER_ACTION
+  ] as string;
+
+  const formProps: Record<string, unknown> = {};
+  for (const key of Object.keys(props)) {
+    if (key === "action") continue;
+    formProps[key] = props[key];
+  }
+  formProps["action"] = `/_rain/action/${actionId}`;
+  if (!formProps["method"]) {
+    formProps["method"] = "POST";
+  }
+
+  const attrs = renderAttrs(formProps);
+
+  let csrfHidden = "";
+  if (ctx.csrf) {
+    ctx.csrf.used = true;
+    csrfHidden =
+      `<input type="hidden" name="_rain_csrf"` +
+      ` value="${escapeHtml(ctx.csrf.token)}">`;
+  }
+
+  const inner = renderChildren(children, ctx);
+  return `<form${attrs}>${csrfHidden}${inner}</form>`;
+}
+
+function renderElement(element: RainElement, ctx: RenderContext): string {
   const { tag, props, children } = element;
 
   if (typeof tag === "function") {
     if (tag === Fragment) {
-      return renderChildren(children);
+      return renderChildren(children, ctx);
     }
+
+    const islandId = (tag as unknown as Record<symbol, unknown>)[RAIN_ISLAND] as
+      | string
+      | undefined;
+    if (islandId !== undefined) {
+      return renderIsland(tag, props, children, islandId, ctx);
+    }
+
     const result = tag({ ...props, children });
     if (result === null) return "";
     if (typeof result === "string") return escapeHtml(result);
-    return renderElement(result);
+    return renderElement(result, ctx);
+  }
+
+  if (tag === "form" && isServerActionFn(props["action"])) {
+    return renderServerActionForm(props, children, ctx);
   }
 
   const attrs = renderAttrs(props);
@@ -164,14 +289,22 @@ function renderElement(element: RainElement): string {
   }
 
   if (RAW_TEXT_ELEMENTS.has(tag)) {
-    const raw = renderRawChildren(tag, children);
+    const raw = renderRawChildren(tag, children, ctx);
     return `<${tag}${attrs}>${raw}</${tag}>`;
   }
 
-  const inner = renderChildren(children);
+  const inner = renderChildren(children, ctx);
   return `<${tag}${attrs}>${inner}</${tag}>`;
 }
 
-export function renderToString(element: RainElement): string {
-  return renderElement(element);
+export function renderToString(
+  element: RainElement,
+  options?: { csrfToken?: string },
+): RenderResult {
+  const ctx: RenderContext = {
+    islandCounter: 0,
+    csrf: options?.csrfToken ? { token: options.csrfToken, used: false } : null,
+  };
+  const html = renderElement(element, ctx);
+  return { html, csrfUsed: ctx.csrf?.used ?? false };
 }

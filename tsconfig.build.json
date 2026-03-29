@@ -11,5 +11,5 @@
     "paths": {}
   },
   "include": ["src/framework/**/*.ts"],
-  "exclude": ["node_modules", "src/framework/db.ts"]
+  "exclude": ["node_modules", "src/framework/db.ts", "src/framework/compiler/directive.ts", "src/framework/compiler/bundle.ts"]
 }

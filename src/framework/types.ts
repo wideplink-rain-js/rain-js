@@ -20,6 +20,7 @@ export interface RainConfig {
   frameworkPackage?: string;
   csrf?: boolean;
   securityHeaders?: Record<string, string> | false;
+  clientScripts?: string[];
 }
 
 export interface RainOptions {
@@ -44,6 +45,11 @@ export type ErrorHandler = (
   error: unknown,
   req: Request,
 ) => Response | Promise<Response>;
+
+export type ServerActionHandler = (
+  ctx: Context,
+  formData: FormData,
+) => Response | undefined | Promise<Response | undefined>;
 
 export interface Schema<T> {
   parse(data: unknown): T;

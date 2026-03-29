@@ -43,5 +43,5 @@
     "rain.config.ts",
     "worker-configuration.d.ts"
   ],
-  "exclude": ["node_modules", "scripts", "src/framework/db.ts"]
+  "exclude": ["node_modules", "scripts", "src/framework/db.ts", "src/framework/client/**", "tests/unit/client/**", "src/framework/compiler/directive.ts", "src/framework/compiler/bundle.ts", "src/framework/compiler/server-action.ts", "tests/unit/compiler/directive.test.ts", "tests/unit/compiler/bundle.test.ts", "tests/unit/compiler/server-action.test.ts"]
 }

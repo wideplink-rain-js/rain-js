@@ -6,9 +6,7 @@ interface D1Env {
   DB: D1Database;
 }
 
-interface DbOptions<
-  S extends Record<string, unknown> = Record<string, never>,
-> {
+interface DbOptions<S extends Record<string, unknown> = Record<string, never>> {
   schema?: S;
   d1?: D1Database;
 }
@@ -47,11 +45,9 @@ export function db<S extends Record<string, unknown>>(
 ): DrizzleD1Database<S> {
   if (isDbOptions(d1OrOptions)) {
     const resolved = resolveD1(d1OrOptions.d1);
-    return (
-      d1OrOptions.schema
-        ? drizzle(resolved, { schema: d1OrOptions.schema })
-        : drizzle(resolved)
-    ) as unknown as DrizzleD1Database<S>;
+    return (d1OrOptions.schema
+      ? drizzle(resolved, { schema: d1OrOptions.schema })
+      : drizzle(resolved)) as unknown as DrizzleD1Database<S>;
   }
   return drizzle(
     resolveD1(d1OrOptions as D1Database | undefined),

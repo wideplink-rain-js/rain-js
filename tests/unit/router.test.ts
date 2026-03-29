@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { Handler, LayoutHandler, PageHandler } from "../../src/framework";
+import type {
+  Handler,
+  LayoutHandler,
+  PageHandler,
+  ServerActionHandler,
+} from "../../src/framework";
 import { createElement, HttpError } from "../../src/framework";
 import { createApp, request } from "../helpers/app";
 
@@ -371,6 +376,228 @@ describe("Rain Router", () => {
         "application/json; charset=UTF-8",
       );
       expect(await res.text()).toBe("");
+    });
+  });
+
+  describe("server actions", () => {
+    it("executes a registered action", async () => {
+      const app = createApp({ csrf: false });
+      const handler: ServerActionHandler = (_ctx, formData) => {
+        const name = formData.get("name");
+        return new Response(`created: ${name}`, { status: 200 });
+      };
+      app.registerAction("addUser", handler);
+
+      const body = new FormData();
+      body.append("name", "Alice");
+      body.append("_rain_csrf", "tok");
+      const res = await request(app, "/_rain/action/addUser", {
+        method: "POST",
+        body,
+        headers: { Cookie: "_rain_csrf=tok" },
+      });
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe("created: Alice");
+    });
+
+    it("returns 404 for unregistered action", async () => {
+      const app = createApp({ csrf: false });
+      const body = new FormData();
+      const res = await request(app, "/_rain/action/missing", {
+        method: "POST",
+        body,
+      });
+      expect(res.status).toBe(404);
+      const text = await res.text();
+      expect(text).toContain("missing");
+    });
+
+    it("redirects to referer by default when handler returns void", async () => {
+      const app = createApp({ csrf: false });
+      const handler: ServerActionHandler = () => {
+        return undefined;
+      };
+      app.registerAction("voidAction", handler);
+
+      const body = new FormData();
+      body.append("_rain_csrf", "tok");
+      const res = await request(app, "/_rain/action/voidAction", {
+        method: "POST",
+        body,
+        headers: {
+          Referer: "http://localhost/users",
+          Cookie: "_rain_csrf=tok",
+        },
+      });
+      expect(res.status).toBe(303);
+      expect(res.headers.get("location")).toBe("http://localhost/users");
+    });
+
+    it("redirects to / when no referer", async () => {
+      const app = createApp({ csrf: false });
+      app.registerAction("noRef", async () => undefined);
+
+      const body = new FormData();
+      body.append("_rain_csrf", "tok");
+      const res = await request(app, "/_rain/action/noRef", {
+        method: "POST",
+        body,
+        headers: { Cookie: "_rain_csrf=tok" },
+      });
+      expect(res.status).toBe(303);
+      expect(res.headers.get("location")).toBe("/");
+    });
+
+    it("registerActions registers multiple actions", async () => {
+      const app = createApp({ csrf: false });
+      app.registerActions({
+        a: async (_ctx, fd) => new Response(`a:${fd.get("v")}`),
+        b: async (_ctx, fd) => new Response(`b:${fd.get("v")}`),
+      });
+
+      const bodyA = new FormData();
+      bodyA.append("v", "1");
+      bodyA.append("_rain_csrf", "tok");
+      const resA = await request(app, "/_rain/action/a", {
+        method: "POST",
+        body: bodyA,
+        headers: { Cookie: "_rain_csrf=tok" },
+      });
+      expect(await resA.text()).toBe("a:1");
+
+      const bodyB = new FormData();
+      bodyB.append("v", "2");
+      bodyB.append("_rain_csrf", "tok");
+      const resB = await request(app, "/_rain/action/b", {
+        method: "POST",
+        body: bodyB,
+        headers: { Cookie: "_rain_csrf=tok" },
+      });
+      expect(await resB.text()).toBe("b:2");
+    });
+
+    it("applies global middleware to action handlers", async () => {
+      const app = createApp({ csrf: false });
+      const order: string[] = [];
+      app.use(async (_ctx, next) => {
+        order.push("mw-before");
+        const res = await next();
+        order.push("mw-after");
+        return res;
+      });
+      app.registerAction("mwTest", () => {
+        order.push("action");
+        return new Response("ok");
+      });
+
+      const body = new FormData();
+      body.append("_rain_csrf", "tok");
+      await request(app, "/_rain/action/mwTest", {
+        method: "POST",
+        body,
+        headers: { Cookie: "_rain_csrf=tok" },
+      });
+      expect(order).toEqual(["mw-before", "action", "mw-after"]);
+    });
+
+    it("validates CSRF token from cookie and form data", async () => {
+      const app = createApp({ csrf: false });
+      app.registerAction("csrfTest", () => {
+        return new Response("ok");
+      });
+
+      const body = new FormData();
+      body.append("_rain_csrf", "token-abc");
+      const res = await request(app, "/_rain/action/csrfTest", {
+        method: "POST",
+        body,
+        headers: {
+          Cookie: "_rain_csrf=token-abc",
+        },
+      });
+      expect(res.status).toBe(200);
+    });
+
+    it("rejects mismatched CSRF tokens", async () => {
+      const app = createApp({ csrf: false });
+      app.registerAction("csrfFail", () => {
+        return new Response("ok");
+      });
+
+      const body = new FormData();
+      body.append("_rain_csrf", "token-a");
+      const res = await request(app, "/_rain/action/csrfFail", {
+        method: "POST",
+        body,
+        headers: {
+          Cookie: "_rain_csrf=token-b",
+        },
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("rejects when both CSRF tokens are absent", async () => {
+      const app = createApp({ csrf: false });
+      app.registerAction("csrfNone", () => {
+        return new Response("ok");
+      });
+
+      const body = new FormData();
+      const res = await request(app, "/_rain/action/csrfNone", {
+        method: "POST",
+        body,
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("rejects when only form token is present", async () => {
+      const app = createApp({ csrf: false });
+      app.registerAction("csrfFormOnly", () => {
+        return new Response("ok");
+      });
+
+      const body = new FormData();
+      body.append("_rain_csrf", "token-a");
+      const res = await request(app, "/_rain/action/csrfFormOnly", {
+        method: "POST",
+        body,
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("rejects when only cookie token is present", async () => {
+      const app = createApp({ csrf: false });
+      app.registerAction("csrfCookieOnly", () => {
+        return new Response("ok");
+      });
+
+      const body = new FormData();
+      const res = await request(app, "/_rain/action/csrfCookieOnly", {
+        method: "POST",
+        body,
+        headers: {
+          Cookie: "_rain_csrf=token-a",
+        },
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("handles action handler errors via onError", async () => {
+      const app = createApp({ csrf: false });
+      app.onError(() => new Response("custom error", { status: 500 }));
+      app.registerAction("errorAction", () => {
+        throw new Error("boom");
+      });
+
+      const body = new FormData();
+      body.append("_rain_csrf", "tok");
+      const res = await request(app, "/_rain/action/errorAction", {
+        method: "POST",
+        body,
+        headers: { Cookie: "_rain_csrf=tok" },
+      });
+      expect(res.status).toBe(500);
+      expect(await res.text()).toBe("custom error");
     });
   });
 });
