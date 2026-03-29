@@ -71,14 +71,14 @@ export function setScheduleUpdate(fn: (fiber: Fiber) => void): void {
   scheduleUpdateFn = fn;
 }
 
+const ssrNoopDispatch: Dispatch<unknown> = () => {
+  return;
+};
+
 export function useState<T>(initial: T): [T, Dispatch<T>] {
   const fiber = currentFiber;
   if (!fiber) {
-    throw new Error(
-      "useState must be called inside a component. " +
-        "Ensure you are not calling hooks conditionally " +
-        "or outside of a render cycle.",
-    );
+    return [initial, ssrNoopDispatch as Dispatch<T>];
   }
 
   const idx = fiber.hookIndex;
@@ -125,19 +125,11 @@ function shallowEqual(
   return true;
 }
 
-function throwHookError(name: string): never {
-  throw new Error(
-    `${name} must be called inside a component. ` +
-      "Ensure you are not calling hooks conditionally " +
-      "or outside of a render cycle.",
-  );
-}
-
 export function useEffect(
   effect: () => undefined | (() => void),
   deps?: unknown[],
 ): void {
-  if (!currentFiber) throwHookError("useEffect");
+  if (!currentFiber) return;
   const fiber = currentFiber;
   const idx = fiber.hookIndex;
   fiber.hookIndex++;
@@ -167,7 +159,7 @@ export interface RefObject<T> {
 }
 
 export function useRef<T>(initial: T): RefObject<T> {
-  if (!currentFiber) throwHookError("useRef");
+  if (!currentFiber) return { current: initial };
   const fiber = currentFiber;
   const idx = fiber.hookIndex;
   fiber.hookIndex++;
@@ -183,7 +175,7 @@ export function useRef<T>(initial: T): RefObject<T> {
 }
 
 export function useMemo<T>(factory: () => T, deps: unknown[]): T {
-  if (!currentFiber) throwHookError("useMemo");
+  if (!currentFiber) return factory();
   const fiber = currentFiber;
   const idx = fiber.hookIndex;
   fiber.hookIndex++;
@@ -236,7 +228,7 @@ export function createContext<T>(defaultValue: T): RainContext<T> {
 }
 
 export function useContext<T>(context: RainContext<T>): T {
-  if (!currentFiber) throwHookError("useContext");
+  if (!currentFiber) return context._defaultValue;
   return context._currentValue;
 }
 

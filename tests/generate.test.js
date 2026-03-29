@@ -16,6 +16,9 @@ const {
   validateNoPageRouteColocation,
   validateNoDuplicateUrls,
   stripRouteGroupSegments,
+  detectAllExportsFromContent,
+  clientFileToIslandId,
+  detectUseClientDirective,
 } = require("../scripts/generate");
 
 describe("filePathToUrlPath", () => {
@@ -703,5 +706,91 @@ describe("validateNoDuplicateUrls", () => {
       ["(pages)/users/page.tsx"],
     );
     assert.deepStrictEqual(errors, []);
+  });
+});
+
+describe("detectAllExportsFromContent", () => {
+  it("detects named exports", () => {
+    const result = detectAllExportsFromContent(
+      "export function Counter() { return null; }\nexport const Label = () => null;",
+    );
+    assert.deepStrictEqual(result.named, ["Counter", "Label"]);
+    assert.strictEqual(result.hasDefault, false);
+  });
+
+  it("detects default export", () => {
+    const result = detectAllExportsFromContent(
+      "export default function App() { return null; }",
+    );
+    assert.deepStrictEqual(result.named, []);
+    assert.strictEqual(result.hasDefault, true);
+  });
+
+  it("detects both default and named exports", () => {
+    const result = detectAllExportsFromContent(
+      "export function Counter() {}\nexport default function App() {}",
+    );
+    assert.deepStrictEqual(result.named, ["Counter"]);
+    assert.strictEqual(result.hasDefault, true);
+  });
+
+  it("detects export assignment", () => {
+    const result = detectAllExportsFromContent(
+      "const App = () => null;\nexport default App;",
+    );
+    assert.strictEqual(result.hasDefault, true);
+  });
+
+  it("detects re-exports via export declaration", () => {
+    const result = detectAllExportsFromContent(
+      'export { Foo, Bar } from "./other";',
+    );
+    assert.deepStrictEqual(result.named, ["Foo", "Bar"]);
+  });
+});
+
+describe("clientFileToIslandId", () => {
+  it("converts path to island id", () => {
+    assert.strictEqual(
+      clientFileToIslandId("components/Counter.tsx"),
+      "components/Counter",
+    );
+  });
+
+  it("handles nested paths", () => {
+    assert.strictEqual(
+      clientFileToIslandId("routes/todo/TodoList.tsx"),
+      "routes/todo/TodoList",
+    );
+  });
+
+  it("normalizes backslashes", () => {
+    assert.strictEqual(
+      clientFileToIslandId("components\\Counter.ts"),
+      "components/Counter",
+    );
+  });
+});
+
+describe("detectUseClientDirective", () => {
+  it("detects use client at file start", () => {
+    assert.strictEqual(
+      detectUseClientDirective('"use client";\nexport function Counter() {}'),
+      true,
+    );
+  });
+
+  it("returns false for non-directive", () => {
+    assert.strictEqual(
+      detectUseClientDirective("export function Counter() {}"),
+      false,
+    );
+  });
+
+  it("returns false for use server", () => {
+    assert.strictEqual(
+      detectUseClientDirective('"use server";\nexport function action() {}'),
+      false,
+    );
   });
 });

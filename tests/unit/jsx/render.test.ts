@@ -359,4 +359,29 @@ describe("server action form rendering", () => {
     expect(html).toContain('action="/submit"');
     expect(html).toContain('method="POST"');
   });
+
+  it("SSR renders island with function component", () => {
+    const Counter = markAsIsland("Counter", () => {
+      return createElement("button", null, "Count: 0");
+    });
+    const el = createElement("div", null, createElement(Counter, null));
+    const { html } = renderToString(el);
+    expect(html).toContain("<!--$rain-island:0:Counter-->");
+    expect(html).toContain("Count: 0");
+    expect(html).toContain("<!--/$rain-island:0-->");
+  });
+
+  it("SSR renders island with props", () => {
+    const Greeting = markAsIsland(
+      "Greeting",
+      (props: Record<string, unknown>) => {
+        const name = props["name"] as string;
+        return createElement("span", null, `Hello ${name}`);
+      },
+    );
+    const el = createElement(Greeting, { name: "World" });
+    const { html } = renderToString(el);
+    expect(html).toContain("Hello World");
+    expect(html).toContain("data-rain-props");
+  });
 });

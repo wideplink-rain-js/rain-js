@@ -587,6 +587,65 @@ function detectExportedMethods(filePath) {
   return detectExportedMethodsFromContent(content);
 }
 
+function collectAllExportedNames(node) {
+  if (ts.isVariableStatement(node)) {
+    return node.declarationList.declarations
+      .filter((d) => ts.isIdentifier(d.name))
+      .map((d) => d.name.text);
+  }
+  if (
+    (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) &&
+    node.name
+  ) {
+    return [node.name.text];
+  }
+  return [];
+}
+
+function collectAllNamedExports(node) {
+  if (
+    !(
+      ts.isExportDeclaration(node) &&
+      node.exportClause &&
+      ts.isNamedExports(node.exportClause)
+    )
+  ) {
+    return [];
+  }
+  return node.exportClause.elements.map((el) => el.name.text);
+}
+
+function detectAllExportsFromContent(content) {
+  const sourceFile = ts.createSourceFile(
+    "file.tsx",
+    content,
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const named = [];
+  let hasDefault = false;
+
+  ts.forEachChild(sourceFile, (node) => {
+    if (ts.isExportAssignment(node) && !node.isExportEquals) {
+      hasDefault = true;
+      return;
+    }
+    if (hasExportKeyword(node)) {
+      const modifiers = ts.canHaveModifiers(node)
+        ? ts.getModifiers(node)
+        : undefined;
+      if (modifiers?.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword)) {
+        hasDefault = true;
+      } else {
+        named.push(...collectAllExportedNames(node));
+      }
+    }
+    named.push(...collectAllNamedExports(node));
+  });
+
+  return { named, hasDefault };
+}
+
 function detectMiddlewareExportFromContent(content) {
   return detectExportedNamesFromContent(content, ["onRequest"]).length > 0;
 }
@@ -773,6 +832,156 @@ function regenerateClient() {
   console.log(`[gen:client] ${clientMsg} -> .rainjs/entry.ts`);
 }
 
+function clientFileToIslandId(relPath) {
+  return relPath
+    .replace(/\\/g, "/")
+    .replace(/\.tsx?$/, "")
+    .replace(/[^a-zA-Z0-9_/]/g, "_");
+}
+
+function generateIslandProxy(clientRelPath, srcDir, fwImport) {
+  const islandDir = path.join(PROJECT_ROOT, BUILD_CONFIG.outDir, "islands");
+  if (!fs.existsSync(islandDir)) {
+    fs.mkdirSync(islandDir, { recursive: true });
+  }
+
+  const fullPath = path.join(srcDir, clientRelPath);
+  const content = fs.readFileSync(fullPath, "utf-8");
+  const { named, hasDefault } = detectAllExportsFromContent(content);
+  const islandId = clientFileToIslandId(clientRelPath);
+
+  const proxyFile = path.join(
+    islandDir,
+    clientRelPath.replace(/\\/g, "/").replace(/\.tsx?$/, ".ts"),
+  );
+  const proxyDir = path.dirname(proxyFile);
+  if (!fs.existsSync(proxyDir)) {
+    fs.mkdirSync(proxyDir, { recursive: true });
+  }
+
+  const proxyEntryDir = path.dirname(proxyFile);
+  let relOriginal = path
+    .relative(
+      proxyEntryDir,
+      path.join(srcDir, clientRelPath.replace(/\.tsx?$/, "")),
+    )
+    .replace(/\\/g, "/");
+  if (!relOriginal.startsWith(".")) relOriginal = `./${relOriginal}`;
+
+  const lines = [];
+  lines.push(`import { markAsIsland } from "${fwImport}";`);
+
+  const importSpecifiers = [];
+  if (hasDefault) {
+    importSpecifiers.push("default as _default");
+  }
+  for (const name of named) {
+    importSpecifiers.push(`${name} as _${name}`);
+  }
+  if (importSpecifiers.length > 0) {
+    lines.push(
+      `import { ${importSpecifiers.join(", ")} } from "${relOriginal}";`,
+    );
+  }
+  lines.push("");
+
+  if (hasDefault) {
+    lines.push(`export default markAsIsland("${islandId}:default", _default);`);
+  }
+  for (const name of named) {
+    lines.push(
+      `export const ${name} = markAsIsland("${islandId}:${name}", _${name});`,
+    );
+  }
+  lines.push("");
+
+  fs.writeFileSync(proxyFile, lines.join("\n"));
+  return { proxyFile, islandId, named, hasDefault };
+}
+
+function generateAllIslandProxies(clientFiles, srcDir, fwImport) {
+  const islandDir = path.join(PROJECT_ROOT, BUILD_CONFIG.outDir, "islands");
+  if (fs.existsSync(islandDir)) {
+    fs.rmSync(islandDir, { recursive: true, force: true });
+  }
+
+  const proxies = [];
+  for (const cf of clientFiles) {
+    proxies.push(generateIslandProxy(cf, srcDir, fwImport));
+  }
+  return proxies;
+}
+
+function updateWranglerAliases(clientFiles, srcDir) {
+  const wranglerPath = path.join(PROJECT_ROOT, "wrangler.toml");
+  if (!fs.existsSync(wranglerPath)) return;
+
+  let content = fs.readFileSync(wranglerPath, "utf-8");
+
+  const markerStart = "# [rain:alias:start]";
+  const markerEnd = "# [rain:alias:end]";
+
+  const startIdx = content.indexOf(markerStart);
+  const endIdx = content.indexOf(markerEnd);
+  if (startIdx !== -1 && endIdx !== -1) {
+    content =
+      content.slice(0, startIdx).trimEnd() +
+      "\n" +
+      content.slice(endIdx + markerEnd.length).trimStart();
+  }
+
+  if (clientFiles.length === 0) {
+    const cleaned = `${content.trimEnd()}
+`;
+    if (cleaned !== fs.readFileSync(wranglerPath, "utf-8")) {
+      fs.writeFileSync(wranglerPath, cleaned);
+    }
+    return;
+  }
+
+  const islandDir = path.join(PROJECT_ROOT, BUILD_CONFIG.outDir, "islands");
+
+  const aliasLines = [markerStart];
+  const hasExistingAlias = /^\[alias\]/m.test(content);
+  if (!hasExistingAlias) {
+    aliasLines.push("[alias]");
+  }
+
+  for (const cf of clientFiles) {
+    const originalAbs = path.join(srcDir, cf.replace(/\.tsx?$/, ""));
+    const proxyAbs = path.join(
+      islandDir,
+      cf.replace(/\\/g, "/").replace(/\.tsx?$/, ".ts"),
+    );
+    const relProxy = path.relative(PROJECT_ROOT, proxyAbs).replace(/\\/g, "/");
+    const relOriginal = path
+      .relative(PROJECT_ROOT, originalAbs)
+      .replace(/\\/g, "/");
+    aliasLines.push(`"./${relOriginal}" = "./${relProxy}"`);
+  }
+  aliasLines.push(markerEnd);
+
+  const aliasBlock = aliasLines.join("\n");
+
+  if (hasExistingAlias) {
+    const aliasIdx = content.search(/^\[alias\]/m);
+    let insertAt = content.indexOf("\n", aliasIdx);
+    if (insertAt === -1) insertAt = content.length;
+    content =
+      content.slice(0, insertAt + 1) +
+      aliasLines.filter((l) => l !== "[alias]").join("\n") +
+      "\n" +
+      content.slice(insertAt + 1);
+  } else {
+    content = `${content.trimEnd()}
+
+${aliasBlock}
+`;
+  }
+
+  fs.writeFileSync(wranglerPath, content);
+}
+
 function generate() {
   if (!fs.existsSync(ROUTES_DIR)) {
     console.error(
@@ -851,6 +1060,9 @@ function generate() {
       ? relativeImportPath(path.join(PROJECT_ROOT, fwPkg))
       : fwPkg;
 
+  generateAllIslandProxies(clientFiles, srcDir, frameworkImport);
+  updateWranglerAliases(clientFiles, srcDir);
+
   const headerImports = [`import { Rain } from "${frameworkImport}";`];
   if (hasConfig) {
     const configPath = relativeImportPath(
@@ -906,6 +1118,11 @@ module.exports = {
   detectDefaultExport,
   detectDefaultExportFromContent,
   detectUseClientDirective,
+  detectAllExportsFromContent,
+  generateIslandProxy,
+  generateAllIslandProxies,
+  updateWranglerAliases,
+  clientFileToIslandId,
   bundleClientFilesSync,
   validateNoPageRouteColocation,
   validateNoDuplicateUrls,

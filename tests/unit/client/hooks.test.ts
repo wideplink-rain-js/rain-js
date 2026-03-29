@@ -21,7 +21,11 @@ import {
   useRef,
   useState,
 } from "../../../src/framework/client/hooks";
-import { createElement } from "../../../src/framework/jsx";
+import {
+  createElement,
+  markAsIsland,
+  renderToString,
+} from "../../../src/framework/jsx";
 
 // @vitest-environment jsdom
 
@@ -41,11 +45,11 @@ describe("useState", () => {
     setScheduleUpdate(() => undefined);
   });
 
-  it("throws when called outside a component", () => {
+  it("returns SSR stub when called outside a component", () => {
     setCurrentFiber(null);
-    expect(() => useState(0)).toThrow(
-      "useState must be called inside a component",
-    );
+    const [val, setter] = useState(0);
+    expect(val).toBe(0);
+    expect(typeof setter).toBe("function");
   });
 
   it("returns initial value on first call", () => {
@@ -174,11 +178,9 @@ describe("useEffect", () => {
     flushPendingEffects();
   });
 
-  it("throws when called outside a component", () => {
+  it("is a noop when called outside a component", () => {
     setCurrentFiber(null);
-    expect(() => useEffect(() => undefined)).toThrow(
-      "useEffect must be called inside a component",
-    );
+    useEffect(() => undefined);
   });
 
   it("creates an effect hook entry", () => {
@@ -311,9 +313,10 @@ describe("cleanupFiberEffects", () => {
 });
 
 describe("useRef", () => {
-  it("throws when called outside a component", () => {
+  it("returns SSR stub when called outside a component", () => {
     setCurrentFiber(null);
-    expect(() => useRef(0)).toThrow("useRef must be called inside a component");
+    const ref = useRef(0);
+    expect(ref.current).toBe(0);
   });
 
   it("returns initial value", () => {
@@ -365,11 +368,10 @@ describe("useRef", () => {
 });
 
 describe("useMemo", () => {
-  it("throws when called outside a component", () => {
+  it("returns factory result when called outside a component", () => {
     setCurrentFiber(null);
-    expect(() => useMemo(() => 1, [])).toThrow(
-      "useMemo must be called inside a component",
-    );
+    const val = useMemo(() => 1, []);
+    expect(val).toBe(1);
   });
 
   it("computes value on first render", () => {
@@ -467,12 +469,10 @@ describe("createContext / useContext", () => {
     expect(value).toBe("default");
   });
 
-  it("throws when useContext called outside", () => {
+  it("returns default value when called outside a component", () => {
     const ctx = createContext("x");
     setCurrentFiber(null);
-    expect(() => useContext(ctx)).toThrow(
-      "useContext must be called inside a component",
-    );
+    expect(useContext(ctx)).toBe("x");
   });
 
   it("reads Provider value", () => {
@@ -507,5 +507,57 @@ describe("createContext / useContext", () => {
     const value = useContext(ctx);
     setCurrentFiber(null);
     expect(value).toBe("inner");
+  });
+});
+
+describe("SSR stubs (no currentFiber)", () => {
+  beforeEach(() => {
+    setCurrentFiber(null);
+  });
+
+  it("useState returns initial value and noop setter", () => {
+    const [value, setter] = useState(42);
+    expect(value).toBe(42);
+    expect(typeof setter).toBe("function");
+    setter(99);
+  });
+
+  it("useEffect is a noop", () => {
+    const fn = vi.fn();
+    useEffect(fn);
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it("useRef returns ref with initial value", () => {
+    const ref = useRef("hello");
+    expect(ref.current).toBe("hello");
+  });
+
+  it("useMemo calls factory immediately", () => {
+    const result = useMemo(() => 10 * 2, []);
+    expect(result).toBe(20);
+  });
+
+  it("useCallback returns callback as-is", () => {
+    const fn = () => 123;
+    const result = useCallback(fn, []);
+    expect(result).toBe(fn);
+  });
+
+  it("useContext returns default value", () => {
+    const ctx = createContext("default-val");
+    const value = useContext(ctx);
+    expect(value).toBe("default-val");
+  });
+
+  it("useState works inside markAsIsland SSR", () => {
+    const Counter = markAsIsland("SSRCounter", () => {
+      const [count] = useState(42);
+      return createElement("button", null, `Count: ${String(count)}`);
+    });
+    const el = createElement("div", null, createElement(Counter, null));
+    const { html } = renderToString(el);
+    expect(html).toContain("Count: 42");
+    expect(html).toContain("<!--$rain-island:0:SSRCounter-->");
   });
 });

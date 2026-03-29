@@ -1,6 +1,6 @@
 {
   "name": "@rainfw/core",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "A TypeScript web framework for Cloudflare Workers",
   "bin": {
     "rainjs": "./cli/index.js"
@@ -58,6 +58,10 @@
     "./db": {
       "types": "./dist/db.d.ts",
       "import": "./dist/db.js"
+    },
+    "./client": {
+      "types": "./dist/client/hooks.d.ts",
+      "import": "./dist/client/hooks.js"
     }
   },
   "devDependencies": {
