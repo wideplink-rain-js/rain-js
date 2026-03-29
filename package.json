@@ -1,6 +1,6 @@
 {
   "name": "@rainfw/core",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "A TypeScript web framework for Cloudflare Workers",
   "bin": {
     "rainjs": "./cli/index.js"
@@ -20,7 +20,7 @@
     "test:watch": "vitest",
     "test:generate": "node --test tests/generate.test.js",
     "bench": "node scripts/bench.js",
-    "build:pkg": "tsc -p tsconfig.build.json && node -e \"require('fs').writeFileSync('dist/package.json',JSON.stringify({type:'module'}))\"",
+    "build:pkg": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && tsc -p tsconfig.client.build.json && node -e \"require('fs').writeFileSync('dist/package.json',JSON.stringify({type:'module'}))\"",
     "prepublishOnly": "npm run build:pkg",
     "release": "npm run ci && npm publish --access public"
   },

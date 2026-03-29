@@ -145,7 +145,7 @@ function hydrateVNodeToDom(dom: Node, vnode: RainElement): void {
       return;
     }
 
-    if (RAIN_ISLAND in (vnode.tag as Record<symbol, unknown>)) {
+    if (RAIN_ISLAND in (vnode.tag as unknown as Record<symbol, unknown>)) {
       return;
     }
 
