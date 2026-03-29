@@ -11,5 +11,12 @@
     "paths": {}
   },
   "include": ["src/framework/**/*.ts"],
-  "exclude": ["node_modules", "src/framework/db.ts", "src/framework/compiler/directive.ts", "src/framework/compiler/bundle.ts"]
+  "exclude": [
+    "node_modules",
+    "src/framework/db.ts",
+    "src/framework/client/**",
+    "src/framework/compiler/directive.ts",
+    "src/framework/compiler/bundle.ts",
+    "src/framework/compiler/server-action.ts"
+  ]
 }
