@@ -21,7 +21,8 @@
     "test:generate": "node --test tests/generate.test.js",
     "bench": "node scripts/bench.js",
     "build:pkg": "tsc -p tsconfig.build.json && node -e \"require('fs').writeFileSync('dist/package.json',JSON.stringify({type:'module'}))\"",
-    "prepublishOnly": "npm run build:pkg"
+    "prepublishOnly": "npm run build:pkg",
+    "release": "npm run ci && npm publish --access public"
   },
   "keywords": [
     "cloudflare-workers",
