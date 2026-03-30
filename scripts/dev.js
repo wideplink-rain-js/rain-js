@@ -2,8 +2,11 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { generate, regenerateClient, ROUTES_DIR } = require("./generate");
+const { printBanner } = require("../cli/utils/banner");
 
 const SRC_DIR = path.join(process.cwd(), "src");
+
+printBanner();
 
 generate();
 

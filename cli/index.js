@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const { spawn } = require("node:child_process");
 
 const { stripControlChars } = require("./utils/sanitize");
+const { printBanner } = require("./utils/banner");
 
 const PACKAGE_JSON = path.join(__dirname, "..", "package.json");
 const pkg = JSON.parse(fs.readFileSync(PACKAGE_JSON, "utf-8"));
@@ -43,6 +44,8 @@ if (command === "--version" || command === "-v") {
   printVersion();
   process.exit(0);
 }
+
+printBanner();
 
 if (!VALID_COMMANDS.includes(command)) {
   console.error(

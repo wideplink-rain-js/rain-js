@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { execSync } = require("node:child_process");
 const ts = require("typescript");
+const { printBanner } = require("../cli/utils/banner");
 
 let esbuild;
 try {
@@ -1133,5 +1134,6 @@ module.exports = {
 };
 
 if (require.main === module) {
+  printBanner();
   generate();
 }

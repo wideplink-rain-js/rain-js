@@ -1,6 +1,9 @@
 const { buildSync } = require("esbuild");
 const path = require("node:path");
 const { performance } = require("node:perf_hooks");
+const { printBanner } = require("../cli/utils/banner");
+
+printBanner();
 const {
   generate,
   detectExportedMethodsFromContent,
