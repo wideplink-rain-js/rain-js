@@ -19,6 +19,15 @@ const FRAMEWORK_PATH = path.join(
   "index.ts",
 );
 
+const CLIENT_HOOKS_PATH = path.join(
+  __dirname,
+  "..",
+  "src",
+  "framework",
+  "client",
+  "hooks.ts",
+);
+
 function loadFramework() {
   const result = buildSync({
     entryPoints: [FRAMEWORK_PATH],
@@ -34,6 +43,604 @@ function loadFramework() {
   const fn = new Function("module", "exports", "require", code);
   fn(mod, mod.exports, require);
   return mod.exports;
+}
+
+function loadClientHooks() {
+  const result = buildSync({
+    entryPoints: [CLIENT_HOOKS_PATH],
+    bundle: true,
+    write: false,
+    format: "cjs",
+    platform: "browser",
+    target: "esnext",
+  });
+  const code = result.outputFiles[0].text;
+  const mod = { exports: {} };
+  const fn = new Function("module", "exports", "require", code);
+  fn(mod, mod.exports, require);
+  return mod.exports;
+}
+
+function createDomMock() {
+  class MockNode {
+    constructor(type) {
+      this.nodeType = type;
+      this._children = [];
+      this.parentNode = null;
+      this.textContent = "";
+    }
+    get childNodes() {
+      return this._children;
+    }
+    get lastChild() {
+      return this._children[this._children.length - 1] ?? null;
+    }
+    appendChild(child) {
+      if (child instanceof MockDocumentFragment) {
+        for (const c of [...child._children]) {
+          this.appendChild(c);
+        }
+        return child;
+      }
+      child.parentNode = this;
+      this._children.push(child);
+      return child;
+    }
+    removeChild(child) {
+      const idx = this._children.indexOf(child);
+      if (idx >= 0) this._children.splice(idx, 1);
+      child.parentNode = null;
+      return child;
+    }
+    replaceChild(newChild, oldChild) {
+      const idx = this._children.indexOf(oldChild);
+      if (idx >= 0) {
+        this._children[idx] = newChild;
+        newChild.parentNode = this;
+        oldChild.parentNode = null;
+      }
+      return oldChild;
+    }
+    insertBefore(newChild, refChild) {
+      if (!refChild) return this.appendChild(newChild);
+      const idx = this._children.indexOf(refChild);
+      if (idx >= 0) {
+        this._children.splice(idx, 0, newChild);
+        newChild.parentNode = this;
+      }
+      return newChild;
+    }
+  }
+
+  MockNode.TEXT_NODE = 3;
+  MockNode.ELEMENT_NODE = 1;
+
+  class MockElement extends MockNode {
+    constructor(tag) {
+      super(1);
+      this.tagName = tag.toUpperCase();
+      this._attrs = {};
+    }
+    setAttribute(k, v) {
+      this._attrs[k] = String(v);
+    }
+    removeAttribute(k) {
+      delete this._attrs[k];
+    }
+    getAttribute(k) {
+      return this._attrs[k] ?? null;
+    }
+    addEventListener() {}
+    removeEventListener() {}
+    querySelector() {
+      return null;
+    }
+  }
+
+  class MockHTMLElement extends MockElement {}
+  class MockHTMLScriptElement extends MockElement {}
+
+  class MockTextNode extends MockNode {
+    constructor(text) {
+      super(3);
+      this.textContent = text;
+    }
+  }
+
+  class MockDocumentFragment extends MockNode {
+    constructor() {
+      super(11);
+    }
+  }
+
+  const mockDocument = {
+    createElement(tag) {
+      return new MockHTMLElement(tag);
+    },
+    createTextNode(text) {
+      return new MockTextNode(text);
+    },
+    createDocumentFragment() {
+      return new MockDocumentFragment();
+    },
+    createTreeWalker() {
+      return {
+        nextNode() {
+          return null;
+        },
+      };
+    },
+    body: new MockHTMLElement("body"),
+  };
+
+  return {
+    Node: MockNode,
+    Element: MockElement,
+    HTMLElement: MockHTMLElement,
+    HTMLScriptElement: MockHTMLScriptElement,
+    NodeFilter: { SHOW_COMMENT: 128 },
+    document: mockDocument,
+    DocumentFragment: MockDocumentFragment,
+  };
+}
+
+function loadClientBundle() {
+  const result = buildSync({
+    stdin: {
+      contents: [
+        'export { setCurrentFiber, setScheduleUpdate, useState, useEffect, useRef, useMemo, useCallback, createContext, useContext, flushPendingEffects, cleanupFiberEffects } from "./src/framework/client/hooks";',
+        'export { initScheduler, flushSync } from "./src/framework/client/scheduler";',
+        'export { reconcile } from "./src/framework/client/reconciler";',
+        'export { createDomNode } from "./src/framework/client/dom";',
+        'export { createElement, Fragment } from "./src/framework/jsx/createElement";',
+      ].join("\n"),
+      resolveDir: path.join(__dirname, ".."),
+    },
+    bundle: true,
+    write: false,
+    format: "cjs",
+    platform: "browser",
+    target: "esnext",
+  });
+  return result.outputFiles[0].text;
+}
+
+function evalClientBundle(code) {
+  const mock = createDomMock();
+  const mod = { exports: {} };
+  const fn = new Function(
+    "module",
+    "exports",
+    "require",
+    "document",
+    "Node",
+    "HTMLElement",
+    "HTMLScriptElement",
+    "Element",
+    "NodeFilter",
+    "DocumentFragment",
+    code,
+  );
+  fn(
+    mod,
+    mod.exports,
+    require,
+    mock.document,
+    mock.Node,
+    mock.HTMLElement,
+    mock.HTMLScriptElement,
+    mock.Element,
+    mock.NodeFilter,
+    mock.DocumentFragment,
+  );
+  return { exports: mod.exports, mock };
+}
+
+function createDummyFiber() {
+  return {
+    vnode: {
+      $$typeof: Symbol.for("rain.element"),
+      tag: "div",
+      props: {},
+      children: [],
+    },
+    dom: {},
+    hooks: [],
+    hookIndex: 0,
+    childFibers: [],
+    parent: null,
+  };
+}
+
+function benchUseStateInit(hooks) {
+  const { setCurrentFiber, useState } = hooks;
+  return bench("useState 初期化", () => {
+    const fiber = createDummyFiber();
+    setCurrentFiber(fiber);
+    useState(0);
+    setCurrentFiber(null);
+  });
+}
+
+function benchUseStateRead(hooks) {
+  const { setCurrentFiber, useState } = hooks;
+  const fiber = createDummyFiber();
+  setCurrentFiber(fiber);
+  useState(0);
+  setCurrentFiber(null);
+
+  return bench("useState 再読み取り", () => {
+    fiber.hookIndex = 0;
+    setCurrentFiber(fiber);
+    useState(0);
+    setCurrentFiber(null);
+  });
+}
+
+function benchUseStateDirectUpdate(hooks) {
+  const { setCurrentFiber, useState, setScheduleUpdate } = hooks;
+  setScheduleUpdate(() => {});
+
+  const fiber = createDummyFiber();
+  setCurrentFiber(fiber);
+  const [, setState] = useState(0);
+  setCurrentFiber(null);
+
+  return bench("useState 更新 (直値)", () => {
+    setState(42);
+    fiber.hookIndex = 0;
+    setCurrentFiber(fiber);
+    useState(0);
+    setCurrentFiber(null);
+  });
+}
+
+function benchUseStateFnUpdate(hooks) {
+  const { setCurrentFiber, useState, setScheduleUpdate } = hooks;
+  setScheduleUpdate(() => {});
+
+  const fiber = createDummyFiber();
+  setCurrentFiber(fiber);
+  const [, setState] = useState(0);
+  setCurrentFiber(null);
+
+  return bench("useState 更新 (関数)", () => {
+    setState((prev) => prev + 1);
+    fiber.hookIndex = 0;
+    setCurrentFiber(fiber);
+    useState(0);
+    setCurrentFiber(null);
+  });
+}
+
+function benchUseEffectInit(hooks) {
+  const { setCurrentFiber, useEffect, flushPendingEffects } = hooks;
+  return bench("useEffect 初期登録", () => {
+    const fiber = createDummyFiber();
+    setCurrentFiber(fiber);
+    useEffect(() => undefined, []);
+    setCurrentFiber(null);
+    flushPendingEffects();
+  });
+}
+
+function benchUseEffectSkip(hooks) {
+  const { setCurrentFiber, useEffect } = hooks;
+  const fiber = createDummyFiber();
+  setCurrentFiber(fiber);
+  useEffect(() => undefined, [1, 2, 3]);
+  setCurrentFiber(null);
+
+  return bench("useEffect deps 不変", () => {
+    fiber.hookIndex = 0;
+    setCurrentFiber(fiber);
+    useEffect(() => undefined, [1, 2, 3]);
+    setCurrentFiber(null);
+  });
+}
+
+function benchUseEffectDepsChanged(hooks) {
+  const { setCurrentFiber, useEffect, flushPendingEffects } = hooks;
+  const fiber = createDummyFiber();
+  setCurrentFiber(fiber);
+  useEffect(() => undefined, [0]);
+  setCurrentFiber(null);
+  flushPendingEffects();
+
+  let i = 0;
+  return bench("useEffect deps 変更", () => {
+    i++;
+    fiber.hookIndex = 0;
+    setCurrentFiber(fiber);
+    useEffect(() => undefined, [i]);
+    setCurrentFiber(null);
+    flushPendingEffects();
+  });
+}
+
+function benchUseRef(hooks) {
+  const { setCurrentFiber, useRef } = hooks;
+  const fiber = createDummyFiber();
+  setCurrentFiber(fiber);
+  useRef(null);
+  setCurrentFiber(null);
+
+  return bench("useRef 読み取り", () => {
+    fiber.hookIndex = 0;
+    setCurrentFiber(fiber);
+    useRef(null);
+    setCurrentFiber(null);
+  });
+}
+
+function benchUseMemoHit(hooks) {
+  const { setCurrentFiber, useMemo } = hooks;
+  const fiber = createDummyFiber();
+  setCurrentFiber(fiber);
+  useMemo(() => 42, [1, 2]);
+  setCurrentFiber(null);
+
+  return bench("useMemo キャッシュヒット", () => {
+    fiber.hookIndex = 0;
+    setCurrentFiber(fiber);
+    useMemo(() => 42, [1, 2]);
+    setCurrentFiber(null);
+  });
+}
+
+function benchUseMemoMiss(hooks) {
+  const { setCurrentFiber, useMemo } = hooks;
+  const fiber = createDummyFiber();
+  setCurrentFiber(fiber);
+  useMemo(() => 42, [0]);
+  setCurrentFiber(null);
+
+  let i = 0;
+  return bench("useMemo 再計算", () => {
+    i++;
+    fiber.hookIndex = 0;
+    setCurrentFiber(fiber);
+    useMemo(() => i * 2, [i]);
+    setCurrentFiber(null);
+  });
+}
+
+function benchUseCallbackHit(hooks) {
+  const { setCurrentFiber, useCallback } = hooks;
+  const fiber = createDummyFiber();
+  const cb = () => {};
+  setCurrentFiber(fiber);
+  useCallback(cb, [1]);
+  setCurrentFiber(null);
+
+  return bench("useCallback キャッシュヒット", () => {
+    fiber.hookIndex = 0;
+    setCurrentFiber(fiber);
+    useCallback(cb, [1]);
+    setCurrentFiber(null);
+  });
+}
+
+function benchCreateContextAndUse(hooks) {
+  const { setCurrentFiber, createContext, useContext } = hooks;
+  const fiber = createDummyFiber();
+
+  return bench("createContext + useContext", () => {
+    const ctx = createContext("value");
+    setCurrentFiber(fiber);
+    useContext(ctx);
+    setCurrentFiber(null);
+  });
+}
+
+function benchHooksScale(hooks, hookCount) {
+  const { setCurrentFiber, useState } = hooks;
+
+  const fiber = createDummyFiber();
+  setCurrentFiber(fiber);
+  for (let i = 0; i < hookCount; i++) {
+    useState(i);
+  }
+  setCurrentFiber(null);
+
+  return bench(`useState × ${hookCount} (再読み取り)`, () => {
+    fiber.hookIndex = 0;
+    setCurrentFiber(fiber);
+    for (let i = 0; i < hookCount; i++) {
+      useState(i);
+    }
+    setCurrentFiber(null);
+  });
+}
+
+function benchRerender(hooks, hookCount) {
+  const {
+    setCurrentFiber,
+    useState,
+    useEffect,
+    useMemo,
+    useRef,
+    setScheduleUpdate,
+    flushPendingEffects,
+  } = hooks;
+  setScheduleUpdate(() => {});
+
+  const fiber = createDummyFiber();
+
+  setCurrentFiber(fiber);
+  const [, setState] = useState(0);
+  for (let i = 1; i < hookCount; i++) {
+    if (i % 3 === 0) useEffect(() => undefined, [i]);
+    else if (i % 3 === 1) useRef(null);
+    else useMemo(() => i * 2, [i]);
+  }
+  setCurrentFiber(null);
+  flushPendingEffects();
+
+  let counter = 0;
+
+  return bench(`再レンダリング (${hookCount} hooks)`, () => {
+    counter++;
+    setState(counter);
+
+    fiber.hookIndex = 0;
+    setCurrentFiber(fiber);
+    useState(0);
+    for (let i = 1; i < hookCount; i++) {
+      if (i % 3 === 0) useEffect(() => undefined, [i]);
+      else if (i % 3 === 1) useRef(null);
+      else useMemo(() => i * 2, [i]);
+    }
+    setCurrentFiber(null);
+    flushPendingEffects();
+  });
+}
+
+function benchFlushEffects(hooks, effectCount) {
+  const { setCurrentFiber, useEffect, flushPendingEffects } = hooks;
+  const iterations = effectCount >= 1000 ? 1000 : 10000;
+
+  return bench(
+    `flushEffects (${effectCount} effects)`,
+    () => {
+      const fiber = createDummyFiber();
+      setCurrentFiber(fiber);
+      for (let i = 0; i < effectCount; i++) {
+        useEffect(() => undefined, []);
+      }
+      setCurrentFiber(null);
+      flushPendingEffects();
+    },
+    iterations,
+  );
+}
+
+function benchReconcilerSimple(client) {
+  const {
+    createElement,
+    createDomNode,
+    setCurrentFiber,
+    setScheduleUpdate,
+    useState,
+    reconcile,
+  } = client.exports;
+  const mockDoc = client.mock.document;
+  setScheduleUpdate(() => {});
+
+  const Counter = () => {
+    const [count] = useState(0);
+    return createElement(
+      "div",
+      { className: "counter" },
+      createElement("span", null, String(count)),
+    );
+  };
+
+  const container = mockDoc.createElement("div");
+  const vnode = createElement(Counter, null);
+
+  const fiber = {
+    vnode,
+    dom: null,
+    hooks: [],
+    hookIndex: 0,
+    childFibers: [],
+    parent: null,
+    rendered: null,
+  };
+
+  setCurrentFiber(fiber);
+  const rendered = Counter({});
+  setCurrentFiber(null);
+
+  fiber.dom = createDomNode(rendered);
+  container.appendChild(fiber.dom);
+  fiber.rendered = rendered;
+
+  const stateHook = fiber.hooks[0];
+  let val = 0;
+
+  return bench("reconcile (単純コンポーネント)", () => {
+    val++;
+    stateHook.queue.push(val);
+
+    fiber.hookIndex = 0;
+    setCurrentFiber(fiber);
+    const newRendered = Counter({});
+    setCurrentFiber(null);
+
+    if (newRendered) {
+      reconcile(container, fiber, newRendered);
+    }
+  });
+}
+
+function benchReconcilerList(client, itemCount) {
+  const {
+    createElement,
+    createDomNode,
+    setCurrentFiber,
+    setScheduleUpdate,
+    useState,
+    reconcile,
+  } = client.exports;
+  const mockDoc = client.mock.document;
+  setScheduleUpdate(() => {});
+
+  const List = () => {
+    const [items] = useState(Array.from({ length: itemCount }, (_, i) => i));
+    return createElement(
+      "ul",
+      null,
+      ...items.map((item) =>
+        createElement("li", { key: String(item) }, `item-${item}`),
+      ),
+    );
+  };
+
+  const container = mockDoc.createElement("div");
+  const vnode = createElement(List, null);
+
+  const fiber = {
+    vnode,
+    dom: null,
+    hooks: [],
+    hookIndex: 0,
+    childFibers: [],
+    parent: null,
+    rendered: null,
+  };
+
+  setCurrentFiber(fiber);
+  const rendered = List({});
+  setCurrentFiber(null);
+
+  fiber.dom = createDomNode(rendered);
+  container.appendChild(fiber.dom);
+  fiber.rendered = rendered;
+
+  const stateHook = fiber.hooks[0];
+  let offset = 0;
+
+  return bench(
+    `reconcile (リスト ${itemCount}件)`,
+    () => {
+      offset++;
+      stateHook.queue.push(
+        Array.from({ length: itemCount }, (_, i) => i + offset),
+      );
+
+      fiber.hookIndex = 0;
+      setCurrentFiber(fiber);
+      const newRendered = List({});
+      setCurrentFiber(null);
+
+      if (newRendered) {
+        reconcile(container, fiber, newRendered);
+      }
+    },
+    itemCount >= 100 ? 1000 : 10000,
+  );
 }
 
 function createDummyHandler() {
@@ -526,6 +1133,58 @@ async function main() {
     await astDefaultBenches.absent(),
   ];
   printTable(astResults);
+
+  console.log("\n## クライアント Hooks\n");
+  const hooks = loadClientHooks();
+  const hookResults = [
+    await benchUseStateInit(hooks),
+    await benchUseStateRead(hooks),
+    await benchUseStateDirectUpdate(hooks),
+    await benchUseStateFnUpdate(hooks),
+    await benchUseEffectInit(hooks),
+    await benchUseEffectSkip(hooks),
+    await benchUseEffectDepsChanged(hooks),
+    await benchUseRef(hooks),
+    await benchUseMemoHit(hooks),
+    await benchUseMemoMiss(hooks),
+    await benchUseCallbackHit(hooks),
+    await benchCreateContextAndUse(hooks),
+  ];
+  printTable(hookResults);
+
+  console.log("\n## Hooks スケールテスト\n");
+  const scaleResults = [
+    await benchHooksScale(hooks, 1),
+    await benchHooksScale(hooks, 10),
+    await benchHooksScale(hooks, 50),
+  ];
+  printTable(scaleResults);
+
+  console.log("\n## 再レンダリングシミュレーション\n");
+  const rerenderResults = [
+    await benchRerender(hooks, 5),
+    await benchRerender(hooks, 10),
+    await benchRerender(hooks, 30),
+  ];
+  printTable(rerenderResults);
+
+  console.log("\n## flushPendingEffects スケール\n");
+  const flushResults = [
+    await benchFlushEffects(hooks, 10),
+    await benchFlushEffects(hooks, 100),
+    await benchFlushEffects(hooks, 1000),
+  ];
+  printTable(flushResults);
+
+  console.log("\n## Reconciler 統合 (DOM モック)\n");
+  const clientCode = loadClientBundle();
+  const client = evalClientBundle(clientCode);
+  const reconcilerResults = [
+    await benchReconcilerSimple(client),
+    await benchReconcilerList(client, 10),
+    await benchReconcilerList(client, 100),
+  ];
+  printTable(reconcilerResults);
 
   console.log(`\n${"=".repeat(60)}`);
   console.log("完了");

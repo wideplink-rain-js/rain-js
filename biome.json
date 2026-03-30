@@ -88,7 +88,8 @@
       "linter": {
         "rules": {
           "suspicious": {
-            "noConsole": "off"
+            "noConsole": "off",
+            "noEmptyBlockStatements": "off"
           }
         }
       }
