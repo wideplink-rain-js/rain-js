@@ -220,7 +220,7 @@ function patchChildAtIndex(
     return;
   }
 
-  if (!(oldChild && newChild && existingDom)) return;
+  if (isNullish(oldChild) || isNullish(newChild) || !existingDom) return;
 
   const newKey = getKey(newChild);
   const oldKey = getKey(oldChild);

@@ -307,4 +307,60 @@ describe("reconciler", () => {
     expect(fiber.dom.textContent).toBe("-42");
     expect(typeof fiber.vnode.tag).toBe("function");
   });
+
+  it("patches falsy number 0 to another number", () => {
+    const old = createElement("span", null, 0);
+    const fiber = makeFiberFromVnode(old, container);
+
+    const updated = createElement("span", null, 1);
+    reconcile(container, fiber, updated);
+
+    const span = container.querySelector("span");
+    expect(span?.textContent).toBe("1");
+  });
+
+  it("patches empty string to non-empty string", () => {
+    const old = createElement("span", null, "");
+    const fiber = makeFiberFromVnode(old, container);
+
+    const updated = createElement("span", null, "hello");
+    reconcile(container, fiber, updated);
+
+    const span = container.querySelector("span");
+    expect(span?.textContent).toBe("hello");
+  });
+
+  it("patches non-empty string to empty string", () => {
+    const old = createElement("span", null, "hello");
+    const fiber = makeFiberFromVnode(old, container);
+
+    const updated = createElement("span", null, "");
+    reconcile(container, fiber, updated);
+
+    const span = container.querySelector("span");
+    expect(span?.textContent).toBe("");
+  });
+
+  it("patches number 0 among siblings", () => {
+    const old = createElement(
+      "div",
+      null,
+      createElement("span", null, "a"),
+      0,
+      createElement("span", null, "b"),
+    );
+    const fiber = makeFiberFromVnode(old, container);
+
+    const updated = createElement(
+      "div",
+      null,
+      createElement("span", null, "a"),
+      42,
+      createElement("span", null, "b"),
+    );
+    reconcile(container, fiber, updated);
+
+    const div = container.firstChild as HTMLElement;
+    expect(div.childNodes[1]?.textContent).toBe("42");
+  });
 });
