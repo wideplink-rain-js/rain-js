@@ -1,4 +1,10 @@
-import { existsSync, mkdirSync, readdirSync, unlinkSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join, relative, resolve } from "node:path";
 import type { Metafile } from "esbuild";
 import { build } from "esbuild";
@@ -8,6 +14,8 @@ export interface BundleOptions {
   outDir: string;
   projectRoot: string;
   minify?: boolean;
+  clientEntrySource?: string;
+  clientEntryDir?: string;
 }
 
 export interface BundleManifest {
@@ -18,7 +26,7 @@ export interface BundleManifest {
 function cleanOldBundles(outDir: string): void {
   if (!existsSync(outDir)) return;
   for (const file of readdirSync(outDir)) {
-    if (file.startsWith("island-")) {
+    if (file.startsWith("island-") || file.startsWith("rain-client-")) {
       unlinkSync(join(outDir, file));
     }
   }
@@ -45,7 +53,7 @@ function extractManifest(
 export async function bundleClientFiles(
   options: BundleOptions,
 ): Promise<BundleManifest> {
-  if (options.entryPoints.length === 0) {
+  if (options.entryPoints.length === 0 && !options.clientEntrySource) {
     return { scripts: [], totalBytes: 0 };
   }
 
@@ -55,14 +63,25 @@ export async function bundleClientFiles(
 
   cleanOldBundles(options.outDir);
 
+  let entryPoints = options.entryPoints;
+
+  if (options.clientEntrySource && options.clientEntryDir) {
+    if (!existsSync(options.clientEntryDir)) {
+      mkdirSync(options.clientEntryDir, { recursive: true });
+    }
+    const clientEntryPath = join(options.clientEntryDir, "client-entry.ts");
+    writeFileSync(clientEntryPath, options.clientEntrySource);
+    entryPoints = [clientEntryPath];
+  }
+
   const result = await build({
-    entryPoints: options.entryPoints,
+    entryPoints,
     outdir: options.outDir,
     bundle: true,
     minify: options.minify ?? true,
     format: "esm",
     metafile: true,
-    entryNames: "island-[hash]",
+    entryNames: "rain-client-[hash]",
     write: true,
     treeShaking: true,
     platform: "browser",

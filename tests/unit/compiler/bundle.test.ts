@@ -65,7 +65,9 @@ describe("bundleClientFiles", () => {
     });
     expect(result.scripts.length).toBeGreaterThanOrEqual(1);
     expect(result.totalBytes).toBeGreaterThan(0);
-    expect(result.scripts[0]).toMatch(/^\/_rain\/island-[a-zA-Z0-9]+\.js$/);
+    expect(result.scripts[0]).toMatch(
+      /^\/_rain\/rain-client-[a-zA-Z0-9]+\.js$/,
+    );
   });
 
   it("creates output directory if it does not exist", async () => {

@@ -213,6 +213,59 @@ function getClientFiles(dir, base = "") {
   return files;
 }
 
+function ensureRelativeImport(importPath) {
+  return importPath.startsWith(".") ? importPath : `./${importPath}`;
+}
+
+function buildIslandImportLines(index, file, srcDir, entryDir) {
+  const fullPath = path.join(srcDir, file);
+  const content = fs.readFileSync(fullPath, "utf-8");
+  const { named, hasDefault } = detectAllExportsFromContent(content);
+  const islandId = clientFileToIslandId(file);
+
+  const importPath = path
+    .relative(entryDir, path.join(srcDir, file.replace(/\.tsx?$/, "")))
+    .replace(/\\/g, "/");
+  const safeImport = ensureRelativeImport(importPath);
+
+  const specifiers = [];
+  if (hasDefault) specifiers.push(`default as _d${index}`);
+  for (const name of named) specifiers.push(`${name} as _n${index}_${name}`);
+  if (specifiers.length === 0) return [];
+
+  const lines = [];
+  lines.push(`import { ${specifiers.join(", ")} } from "${safeImport}";`);
+  if (hasDefault) {
+    lines.push(`registerIsland("${islandId}:default", _d${index});`);
+  }
+  for (const name of named) {
+    lines.push(`registerIsland("${islandId}:${name}", _n${index}_${name});`);
+  }
+  return lines;
+}
+
+function generateClientEntrySource(clientFiles, srcDir) {
+  const entryDir = path.join(PROJECT_ROOT, BUILD_CONFIG.outDir);
+  const runtimePath = path
+    .relative(entryDir, path.join(PROJECT_ROOT, "src/framework/client/runtime"))
+    .replace(/\\/g, "/");
+  const runtimeImport = ensureRelativeImport(runtimePath);
+
+  const lines = [];
+  lines.push(
+    `import { registerIsland, startHydration } from "${runtimeImport}";`,
+  );
+
+  for (let i = 0; i < clientFiles.length; i++) {
+    lines.push(...buildIslandImportLines(i, clientFiles[i], srcDir, entryDir));
+  }
+
+  lines.push("startHydration();");
+  lines.push("");
+
+  return lines.join("\n");
+}
+
 function bundleClientFilesSync(clientFiles, srcDir) {
   if (clientFiles.length === 0) return [];
   if (!esbuild) {
@@ -230,21 +283,27 @@ function bundleClientFilesSync(clientFiles, srcDir) {
   }
 
   for (const file of fs.readdirSync(outDir)) {
-    if (file.startsWith("island-")) {
+    if (file.startsWith("island-") || file.startsWith("rain-client-")) {
       fs.unlinkSync(path.join(outDir, file));
     }
   }
 
-  const entryPoints = clientFiles.map((f) => path.join(srcDir, f));
+  const entrySource = generateClientEntrySource(clientFiles, srcDir);
+  const entryDir = path.join(PROJECT_ROOT, BUILD_CONFIG.outDir);
+  if (!fs.existsSync(entryDir)) {
+    fs.mkdirSync(entryDir, { recursive: true });
+  }
+  const clientEntryPath = path.join(entryDir, "client-entry.ts");
+  fs.writeFileSync(clientEntryPath, entrySource);
 
   const result = esbuild.buildSync({
-    entryPoints,
+    entryPoints: [clientEntryPath],
     outdir: outDir,
     bundle: true,
     minify: true,
     format: "esm",
     metafile: true,
-    entryNames: "island-[hash]",
+    entryNames: "rain-client-[hash]",
     write: true,
     treeShaking: true,
     platform: "browser",
@@ -1125,6 +1184,7 @@ module.exports = {
   updateWranglerAliases,
   clientFileToIslandId,
   bundleClientFilesSync,
+  generateClientEntrySource,
   validateNoPageRouteColocation,
   validateNoDuplicateUrls,
   stripRouteGroupSegments,
