@@ -8,6 +8,7 @@ import {
   hydrateIsland,
   hydrateIslands,
 } from "../../../src/framework/client/hydrate";
+import { reconcile } from "../../../src/framework/client/reconciler";
 import { createElement } from "../../../src/framework/jsx";
 import type { RainComponent } from "../../../src/framework/jsx/types";
 
@@ -249,5 +250,171 @@ describe("hydrateIslands", () => {
 
     hydrateIslands(container, registry);
     expect(receivedProps[0]).toEqual({ name: "Alice" });
+  });
+});
+
+describe("hydrateChildren text node alignment", () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    setScheduleUpdate(() => undefined);
+  });
+
+  it("splits merged text node into multiple vDOM text children", () => {
+    const button = document.createElement("button");
+    button.textContent = "0 / 1 完了";
+    container.appendChild(button);
+
+    const Comp: RainComponent = () =>
+      createElement("button", null, 0, " / ", 1, " 完了");
+
+    hydrateIsland(button, Comp, {});
+
+    expect(button.childNodes.length).toBe(4);
+    expect(button.childNodes[0]?.textContent).toBe("0");
+    expect(button.childNodes[1]?.textContent).toBe(" / ");
+    expect(button.childNodes[2]?.textContent).toBe("1");
+    expect(button.childNodes[3]?.textContent).toBe(" 完了");
+  });
+
+  it("preserves single text child without splitting", () => {
+    const p = document.createElement("p");
+    p.textContent = "hello world";
+    container.appendChild(p);
+
+    const Comp: RainComponent = () => createElement("p", null, "hello world");
+
+    hydrateIsland(p, Comp, {});
+
+    expect(p.childNodes.length).toBe(1);
+    expect(p.textContent).toBe("hello world");
+  });
+
+  it("preserves element nodes between text runs", () => {
+    const div = document.createElement("div");
+    div.innerHTML = "hello<span>!</span>world";
+    container.appendChild(div);
+
+    const Comp: RainComponent = () =>
+      createElement(
+        "div",
+        null,
+        "hello",
+        createElement("span", null, "!"),
+        "world",
+      );
+
+    hydrateIsland(div, Comp, {});
+
+    expect(div.childNodes.length).toBe(3);
+    expect(div.childNodes[0]?.textContent).toBe("hello");
+    expect((div.childNodes[1] as Element).tagName).toBe("SPAN");
+    expect(div.childNodes[2]?.textContent).toBe("world");
+  });
+
+  it("splits text containing number 0", () => {
+    const span = document.createElement("span");
+    span.textContent = "count: 0";
+    container.appendChild(span);
+
+    const Comp: RainComponent = () => createElement("span", null, "count: ", 0);
+
+    hydrateIsland(span, Comp, {});
+
+    expect(span.childNodes.length).toBe(2);
+    expect(span.childNodes[0]?.textContent).toBe("count: ");
+    expect(span.childNodes[1]?.textContent).toBe("0");
+  });
+
+  it("splits text when leading child is empty string", () => {
+    const span = document.createElement("span");
+    span.textContent = "hello";
+    container.appendChild(span);
+
+    const Comp: RainComponent = () => createElement("span", null, "", "hello");
+
+    hydrateIsland(span, Comp, {});
+
+    expect(span.childNodes.length).toBe(1);
+    expect(span.textContent).toBe("hello");
+  });
+
+  it("splits text when trailing child is empty string", () => {
+    const span = document.createElement("span");
+    span.textContent = "hello";
+    container.appendChild(span);
+
+    const Comp: RainComponent = () => createElement("span", null, "hello", "");
+
+    hydrateIsland(span, Comp, {});
+
+    expect(span.textContent).toBe("hello");
+  });
+
+  it("splits text nodes inside nested elements", () => {
+    const div = document.createElement("div");
+    const p = document.createElement("p");
+    p.textContent = "3 items";
+    div.appendChild(p);
+    container.appendChild(div);
+
+    const Comp: RainComponent = () =>
+      createElement("div", null, createElement("p", null, 3, " items"));
+
+    hydrateIsland(div, Comp, {});
+
+    expect(p.childNodes.length).toBe(2);
+    expect(p.childNodes[0]?.textContent).toBe("3");
+    expect(p.childNodes[1]?.textContent).toBe(" items");
+  });
+
+  it("handles three consecutive number children", () => {
+    const span = document.createElement("span");
+    span.textContent = "123";
+    container.appendChild(span);
+
+    const Comp: RainComponent = () => createElement("span", null, 1, 2, 3);
+
+    hydrateIsland(span, Comp, {});
+
+    expect(span.childNodes.length).toBe(3);
+    expect(span.childNodes[0]?.textContent).toBe("1");
+    expect(span.childNodes[1]?.textContent).toBe("2");
+    expect(span.childNodes[2]?.textContent).toBe("3");
+  });
+});
+
+describe("hydration to reconciliation integration", () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    setScheduleUpdate(() => undefined);
+  });
+
+  it("updates split text nodes via reconcile", () => {
+    const button = document.createElement("button");
+    button.textContent = "0 / 1 完了";
+    container.appendChild(button);
+
+    const Comp: RainComponent = () => {
+      const [c] = useState(0);
+      const [t] = useState(1);
+      return createElement("button", null, c, " / ", t, " 完了");
+    };
+
+    const fiber = hydrateIsland(button, Comp, {});
+
+    expect(button.childNodes.length).toBe(4);
+
+    const newVnode = createElement("button", null, 1, " / ", 2, " 完了");
+    reconcile(container, fiber, newVnode);
+
+    expect(button.textContent).toBe("1 / 2 完了");
+    expect(button.childNodes[0]?.textContent).toBe("1");
+    expect(button.childNodes[2]?.textContent).toBe("2");
   });
 });

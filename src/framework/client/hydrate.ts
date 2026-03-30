@@ -121,10 +121,70 @@ function attachEventHandlers(
   }
 }
 
+function isTextChild(child: RainNode): boolean {
+  return typeof child === "string" || typeof child === "number";
+}
+
+function childToText(child: RainNode): string {
+  if (typeof child === "number") return String(child);
+  if (typeof child === "string") return child;
+  return "";
+}
+
+function countTextRun(flat: RainNode[], start: number): number {
+  let end = start + 1;
+  while (end < flat.length && isTextChild(flat[end] as RainNode)) {
+    end++;
+  }
+  return end;
+}
+
+function splitTextNode(
+  textNode: Text,
+  flat: RainNode[],
+  start: number,
+  end: number,
+): void {
+  let current = textNode;
+  for (let j = start; j < end - 1; j++) {
+    const len = childToText(flat[j] as RainNode).length;
+    if (len > 0 && len < current.data.length) {
+      current = current.splitText(len);
+    }
+  }
+}
+
+function splitMergedTextNodes(parent: Node, flat: RainNode[]): void {
+  let domIndex = 0;
+  let i = 0;
+
+  while (i < flat.length) {
+    const domNode = parent.childNodes[domIndex];
+    if (!domNode) break;
+
+    if (isTextChild(flat[i] as RainNode)) {
+      const runEnd = countTextRun(flat, i);
+      const runLen = runEnd - i;
+
+      if (runLen > 1 && domNode.nodeType === Node.TEXT_NODE) {
+        splitTextNode(domNode as Text, flat, i, runEnd);
+      }
+
+      domIndex += runLen;
+      i = runEnd;
+    } else {
+      domIndex++;
+      i++;
+    }
+  }
+}
+
 function hydrateChildren(parent: Node, children: RainNode[]): void {
   const flat = flattenChildren(children).filter(
     (c) => c !== null && c !== undefined && typeof c !== "boolean",
   );
+
+  splitMergedTextNodes(parent, flat);
 
   let domIndex = 0;
   for (const child of flat) {
