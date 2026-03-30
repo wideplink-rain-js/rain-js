@@ -23,11 +23,11 @@ export type RainChild =
 
 export type RainNode = RainChild | RainChild[];
 
-export function markAsIsland<T extends RainComponent>(
+export function markAsIsland<P extends Record<string, unknown>>(
   id: string,
-  component: T,
-): T {
-  (component as Record<symbol, unknown>)[RAIN_ISLAND] = id;
+  component: (props: P) => RainElement | string | null,
+): (props: P) => RainElement | string | null {
+  (component as unknown as Record<symbol, unknown>)[RAIN_ISLAND] = id;
   return component;
 }
 

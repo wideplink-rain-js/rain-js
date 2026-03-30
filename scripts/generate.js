@@ -917,13 +917,36 @@ function regenerateClient() {
 
   if (!fs.existsSync(ENTRY_FILE)) return;
 
-  const content = fs.readFileSync(ENTRY_FILE, "utf-8");
+  let content = fs.readFileSync(ENTRY_FILE, "utf-8");
   const hasConfig = fs.existsSync(CONFIG_FILE);
   const appInit = buildAppInitLine(clientScripts, hasConfig);
-  const updated = content.replace(/^const app = new Rain\(.*\);$/m, appInit);
-  if (updated !== content) {
-    fs.writeFileSync(ENTRY_FILE, updated);
+  content = content.replace(/^const app = new Rain\(.*\);$/m, appInit);
+
+  const islandStart = "// [rain:islands:start]";
+  const islandEnd = "// [rain:islands:end]";
+  const startIdx = content.indexOf(islandStart);
+  const endIdx = content.indexOf(islandEnd);
+  if (startIdx !== -1 && endIdx !== -1) {
+    const frameworkImport =
+      fwPkg.startsWith(".") || fwPkg.startsWith("/")
+        ? relativeImportPath(path.join(PROJECT_ROOT, fwPkg))
+        : fwPkg;
+    const newIslandLines = generateIslandMarkLines(
+      clientFiles,
+      srcDir,
+      frameworkImport,
+    );
+    const newBlock =
+      newIslandLines.length > 0
+        ? `${islandStart}\n${newIslandLines.join("\n")}\n${islandEnd}`
+        : `${islandStart}\n${islandEnd}`;
+    content =
+      content.slice(0, startIdx) +
+      newBlock +
+      content.slice(endIdx + islandEnd.length);
   }
+
+  fs.writeFileSync(ENTRY_FILE, content);
 
   const clientMsg =
     clientFiles.length > 0 ? `${clientFiles.length} client` : "0 client";
@@ -937,88 +960,55 @@ function clientFileToIslandId(relPath) {
     .replace(/[^a-zA-Z0-9_/]/g, "_");
 }
 
-function generateIslandProxy(clientRelPath, srcDir, fwImport) {
-  const islandDir = path.join(PROJECT_ROOT, BUILD_CONFIG.outDir, "islands");
-  if (!fs.existsSync(islandDir)) {
-    fs.mkdirSync(islandDir, { recursive: true });
-  }
-
-  const fullPath = path.join(srcDir, clientRelPath);
-  const content = fs.readFileSync(fullPath, "utf-8");
-  const { named, hasDefault } = detectAllExportsFromContent(content);
-  const islandId = clientFileToIslandId(clientRelPath);
-
-  const proxyFile = path.join(
-    islandDir,
-    clientRelPath.replace(/\\/g, "/").replace(/\.tsx?$/, ".ts"),
-  );
-  const proxyDir = path.dirname(proxyFile);
-  if (!fs.existsSync(proxyDir)) {
-    fs.mkdirSync(proxyDir, { recursive: true });
-  }
-
-  const proxyEntryDir = path.dirname(proxyFile);
-  let relOriginal = path
-    .relative(
-      proxyEntryDir,
-      path.join(srcDir, clientRelPath.replace(/\.tsx?$/, "")),
-    )
-    .replace(/\\/g, "/");
-  if (!relOriginal.startsWith(".")) relOriginal = `./${relOriginal}`;
-
+function generateIslandMarkLines(clientFiles, srcDir, fwImport) {
+  const entryDir = path.dirname(ENTRY_FILE);
   const lines = [];
+
+  if (clientFiles.length === 0) return lines;
+
   lines.push(`import { markAsIsland } from "${fwImport}";`);
 
-  const importSpecifiers = [];
-  if (hasDefault) {
-    importSpecifiers.push("default as _default");
-  }
-  for (const name of named) {
-    importSpecifiers.push(`${name} as _${name}`);
-  }
-  if (importSpecifiers.length > 0) {
-    lines.push(
-      `import { ${importSpecifiers.join(", ")} } from "${relOriginal}";`,
-    );
-  }
-  lines.push("");
+  for (let i = 0; i < clientFiles.length; i++) {
+    const cf = clientFiles[i];
+    const fullPath = path.join(srcDir, cf);
+    const content = fs.readFileSync(fullPath, "utf-8");
+    const { named, hasDefault } = detectAllExportsFromContent(content);
+    const islandId = clientFileToIslandId(cf);
 
-  if (hasDefault) {
-    lines.push(`export default markAsIsland("${islandId}:default", _default);`);
-  }
-  for (const name of named) {
-    lines.push(
-      `export const ${name} = markAsIsland("${islandId}:${name}", _${name});`,
-    );
-  }
-  lines.push("");
+    const importPath = path
+      .relative(entryDir, path.join(srcDir, cf.replace(/\.tsx?$/, "")))
+      .replace(/\\/g, "/");
+    const safeImport = ensureRelativeImport(importPath);
 
-  fs.writeFileSync(proxyFile, lines.join("\n"));
-  return { proxyFile, islandId, named, hasDefault };
+    const specifiers = [];
+    if (hasDefault) specifiers.push(`default as _island${i}`);
+    for (const name of named) specifiers.push(`${name} as _island${i}_${name}`);
+    if (specifiers.length === 0) continue;
+
+    lines.push(`import { ${specifiers.join(", ")} } from "${safeImport}";`);
+    if (hasDefault) {
+      lines.push(`markAsIsland("${islandId}:default", _island${i});`);
+    }
+    for (const name of named) {
+      lines.push(`markAsIsland("${islandId}:${name}", _island${i}_${name});`);
+    }
+  }
+
+  return lines;
 }
 
-function generateAllIslandProxies(clientFiles, srcDir, fwImport) {
+function cleanupLegacyIslandArtifacts() {
   const islandDir = path.join(PROJECT_ROOT, BUILD_CONFIG.outDir, "islands");
   if (fs.existsSync(islandDir)) {
     fs.rmSync(islandDir, { recursive: true, force: true });
   }
 
-  const proxies = [];
-  for (const cf of clientFiles) {
-    proxies.push(generateIslandProxy(cf, srcDir, fwImport));
-  }
-  return proxies;
-}
-
-function updateWranglerAliases(clientFiles, srcDir) {
   const wranglerPath = path.join(PROJECT_ROOT, "wrangler.toml");
   if (!fs.existsSync(wranglerPath)) return;
 
   let content = fs.readFileSync(wranglerPath, "utf-8");
-
   const markerStart = "# [rain:alias:start]";
   const markerEnd = "# [rain:alias:end]";
-
   const startIdx = content.indexOf(markerStart);
   const endIdx = content.indexOf(markerEnd);
   if (startIdx !== -1 && endIdx !== -1) {
@@ -1026,58 +1016,8 @@ function updateWranglerAliases(clientFiles, srcDir) {
       content.slice(0, startIdx).trimEnd() +
       "\n" +
       content.slice(endIdx + markerEnd.length).trimStart();
+    fs.writeFileSync(wranglerPath, content);
   }
-
-  if (clientFiles.length === 0) {
-    const cleaned = `${content.trimEnd()}
-`;
-    if (cleaned !== fs.readFileSync(wranglerPath, "utf-8")) {
-      fs.writeFileSync(wranglerPath, cleaned);
-    }
-    return;
-  }
-
-  const islandDir = path.join(PROJECT_ROOT, BUILD_CONFIG.outDir, "islands");
-
-  const aliasLines = [markerStart];
-  const hasExistingAlias = /^\[alias\]/m.test(content);
-  if (!hasExistingAlias) {
-    aliasLines.push("[alias]");
-  }
-
-  for (const cf of clientFiles) {
-    const originalAbs = path.join(srcDir, cf.replace(/\.tsx?$/, ""));
-    const proxyAbs = path.join(
-      islandDir,
-      cf.replace(/\\/g, "/").replace(/\.tsx?$/, ".ts"),
-    );
-    const relProxy = path.relative(PROJECT_ROOT, proxyAbs).replace(/\\/g, "/");
-    const relOriginal = path
-      .relative(PROJECT_ROOT, originalAbs)
-      .replace(/\\/g, "/");
-    aliasLines.push(`"./${relOriginal}" = "./${relProxy}"`);
-  }
-  aliasLines.push(markerEnd);
-
-  const aliasBlock = aliasLines.join("\n");
-
-  if (hasExistingAlias) {
-    const aliasIdx = content.search(/^\[alias\]/m);
-    let insertAt = content.indexOf("\n", aliasIdx);
-    if (insertAt === -1) insertAt = content.length;
-    content =
-      content.slice(0, insertAt + 1) +
-      aliasLines.filter((l) => l !== "[alias]").join("\n") +
-      "\n" +
-      content.slice(insertAt + 1);
-  } else {
-    content = `${content.trimEnd()}
-
-${aliasBlock}
-`;
-  }
-
-  fs.writeFileSync(wranglerPath, content);
 }
 
 function generate() {
@@ -1158,8 +1098,12 @@ function generate() {
       ? relativeImportPath(path.join(PROJECT_ROOT, fwPkg))
       : fwPkg;
 
-  generateAllIslandProxies(clientFiles, srcDir, frameworkImport);
-  updateWranglerAliases(clientFiles, srcDir);
+  cleanupLegacyIslandArtifacts();
+  const islandMarkLines = generateIslandMarkLines(
+    clientFiles,
+    srcDir,
+    frameworkImport,
+  );
 
   const headerImports = [`import { Rain } from "${frameworkImport}";`];
   if (hasConfig) {
@@ -1171,8 +1115,14 @@ function generate() {
 
   const appInit = buildAppInitLine(clientScripts, hasConfig);
 
+  const islandBlock =
+    islandMarkLines.length > 0
+      ? ["// [rain:islands:start]", ...islandMarkLines, "// [rain:islands:end]"]
+      : ["// [rain:islands:start]", "// [rain:islands:end]"];
+
   const content = [
     ...headerImports,
+    ...islandBlock,
     ...imports,
     "",
     appInit,
@@ -1217,9 +1167,8 @@ module.exports = {
   detectDefaultExportFromContent,
   detectUseClientDirective,
   detectAllExportsFromContent,
-  generateIslandProxy,
-  generateAllIslandProxies,
-  updateWranglerAliases,
+  generateIslandMarkLines,
+  cleanupLegacyIslandArtifacts,
   clientFileToIslandId,
   bundleClientFilesSync,
   generateClientEntrySource,
