@@ -1,6 +1,6 @@
 {
   "name": "@rainfw/core",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "A TypeScript web framework for Cloudflare Workers",
   "bin": {
     "rainjs": "./cli/index.js"
@@ -62,6 +62,14 @@
     "./client": {
       "types": "./dist/client/hooks.d.ts",
       "import": "./dist/client/hooks.js"
+    },
+    "./client/runtime": {
+      "types": "./dist/client/runtime.d.ts",
+      "import": "./dist/client/runtime.js"
+    },
+    "./client/jsx-runtime": {
+      "types": "./dist/client/jsx-runtime.d.ts",
+      "import": "./dist/client/jsx-runtime.js"
     }
   },
   "devDependencies": {

@@ -244,12 +244,20 @@ function buildIslandImportLines(index, file, srcDir, entryDir) {
   return lines;
 }
 
-function generateClientEntrySource(clientFiles, srcDir) {
+function resolveClientRuntimeImport(fwPkg) {
+  if (fwPkg.startsWith(".") || fwPkg.startsWith("/")) {
+    const entryDir = path.join(PROJECT_ROOT, BUILD_CONFIG.outDir);
+    const runtimePath = path
+      .relative(entryDir, path.join(PROJECT_ROOT, fwPkg, "client/runtime"))
+      .replace(/\\/g, "/");
+    return ensureRelativeImport(runtimePath);
+  }
+  return `${fwPkg}/client/runtime`;
+}
+
+function generateClientEntrySource(clientFiles, srcDir, fwPkg) {
   const entryDir = path.join(PROJECT_ROOT, BUILD_CONFIG.outDir);
-  const runtimePath = path
-    .relative(entryDir, path.join(PROJECT_ROOT, "src/framework/client/runtime"))
-    .replace(/\\/g, "/");
-  const runtimeImport = ensureRelativeImport(runtimePath);
+  const runtimeImport = resolveClientRuntimeImport(fwPkg);
 
   const lines = [];
   lines.push(
@@ -266,7 +274,19 @@ function generateClientEntrySource(clientFiles, srcDir) {
   return lines.join("\n");
 }
 
-function bundleClientFilesSync(clientFiles, srcDir) {
+function buildClientEsbuildAliases(fwPkg) {
+  if (fwPkg.startsWith(".") || fwPkg.startsWith("/")) {
+    const clientDir = path.resolve(PROJECT_ROOT, fwPkg, "client");
+    return {
+      "@rainfw/core/jsx-runtime": path.join(clientDir, "jsx-runtime.ts"),
+      "@rainfw/core/client/runtime": path.join(clientDir, "runtime.ts"),
+      "@rainfw/core/client/jsx-runtime": path.join(clientDir, "jsx-runtime.ts"),
+    };
+  }
+  return {};
+}
+
+function bundleClientFilesSync(clientFiles, srcDir, fwPkg) {
   if (clientFiles.length === 0) return [];
   if (!esbuild) {
     console.warn(
@@ -288,7 +308,7 @@ function bundleClientFilesSync(clientFiles, srcDir) {
     }
   }
 
-  const entrySource = generateClientEntrySource(clientFiles, srcDir);
+  const entrySource = generateClientEntrySource(clientFiles, srcDir, fwPkg);
   const entryDir = path.join(PROJECT_ROOT, BUILD_CONFIG.outDir);
   if (!fs.existsSync(entryDir)) {
     fs.mkdirSync(entryDir, { recursive: true });
@@ -310,12 +330,7 @@ function bundleClientFilesSync(clientFiles, srcDir) {
     target: ["es2022"],
     jsx: "automatic",
     jsxImportSource: "@rainfw/core",
-    alias: {
-      "@rainfw/core/jsx-runtime": path.resolve(
-        PROJECT_ROOT,
-        "src/framework/client/jsx-runtime.ts",
-      ),
-    },
+    alias: buildClientEsbuildAliases(fwPkg),
     loader: { ".ts": "ts", ".tsx": "tsx" },
   });
 
@@ -875,7 +890,8 @@ function buildAppInitLine(clientScripts, hasConfig) {
 function regenerateClient() {
   const srcDir = path.join(PROJECT_ROOT, "src");
   const clientFiles = getClientFiles(srcDir);
-  const clientScripts = bundleClientFilesSync(clientFiles, srcDir);
+  const fwPkg = BUILD_CONFIG.frameworkPackage;
+  const clientScripts = bundleClientFilesSync(clientFiles, srcDir, fwPkg);
 
   if (!fs.existsSync(ENTRY_FILE)) return;
 
@@ -1111,10 +1127,9 @@ function generate() {
 
   const srcDir = path.join(PROJECT_ROOT, "src");
   const clientFiles = getClientFiles(srcDir);
-  const clientScripts = bundleClientFilesSync(clientFiles, srcDir);
-
   const hasConfig = fs.existsSync(CONFIG_FILE);
   const fwPkg = BUILD_CONFIG.frameworkPackage;
+  const clientScripts = bundleClientFilesSync(clientFiles, srcDir, fwPkg);
   const frameworkImport =
     fwPkg.startsWith(".") || fwPkg.startsWith("/")
       ? relativeImportPath(path.join(PROJECT_ROOT, fwPkg))
