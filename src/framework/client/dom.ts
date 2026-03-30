@@ -2,6 +2,8 @@ import { Fragment } from "../jsx/createElement";
 import type { RainElement, RainNode } from "../jsx/types";
 import { RAIN_ELEMENT } from "../jsx/types";
 
+const IDL_PROPERTIES = new Set(["value", "checked", "selected"]);
+
 const BOOLEAN_ATTRS = new Set([
   "allowfullscreen",
   "async",
@@ -70,6 +72,11 @@ function applySpecialProp(
 }
 
 function applyRegularProp(el: HTMLElement, key: string, value: unknown): void {
+  if (IDL_PROPERTIES.has(key)) {
+    (el as unknown as Record<string, unknown>)[key] = value;
+    return;
+  }
+
   if (BOOLEAN_ATTRS.has(key)) {
     if (value) {
       el.setAttribute(key, "");

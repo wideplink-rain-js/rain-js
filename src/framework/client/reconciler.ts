@@ -59,6 +59,36 @@ function nodeToText(node: RainNode): string {
   return "";
 }
 
+const IDL_DEFAULTS: Record<string, unknown> = {
+  value: "",
+  checked: false,
+  selected: false,
+};
+
+function removeSingleProp(
+  el: HTMLElement,
+  key: string,
+  oldValue: unknown,
+): void {
+  if (key.startsWith("on") && typeof oldValue === "function") {
+    const eventName = key.slice(2).toLowerCase();
+    el.removeEventListener(eventName, oldValue as EventListener);
+    return;
+  }
+
+  if (key === "className") {
+    el.removeAttribute("class");
+    return;
+  }
+
+  if (key in IDL_DEFAULTS) {
+    (el as unknown as Record<string, unknown>)[key] = IDL_DEFAULTS[key];
+    return;
+  }
+
+  el.removeAttribute(key);
+}
+
 function removeOldProps(
   el: HTMLElement,
   oldProps: Record<string, unknown>,
@@ -67,18 +97,7 @@ function removeOldProps(
   for (const key of Object.keys(oldProps)) {
     if (key === "children" || key === "key" || key === "ref") continue;
     if (key in newProps) continue;
-
-    if (key.startsWith("on") && typeof oldProps[key] === "function") {
-      const eventName = key.slice(2).toLowerCase();
-      el.removeEventListener(eventName, oldProps[key] as EventListener);
-      continue;
-    }
-
-    if (key === "className") {
-      el.removeAttribute("class");
-    } else {
-      el.removeAttribute(key);
-    }
+    removeSingleProp(el, key, oldProps[key]);
   }
 }
 

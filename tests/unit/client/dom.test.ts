@@ -153,4 +153,34 @@ describe("applyProps", () => {
     });
     expect(el.attributes).toHaveLength(0);
   });
+
+  it("sets value via DOM property instead of setAttribute", () => {
+    const el = document.createElement("input");
+    applyProps(el, { value: "hello" });
+    expect(el.value).toBe("hello");
+  });
+
+  it("resets value via DOM property to empty string", () => {
+    const el = document.createElement("input");
+    el.value = "typed-by-user";
+    applyProps(el, { value: "" });
+    expect(el.value).toBe("");
+  });
+
+  it("sets checked via DOM property", () => {
+    const el = document.createElement("input");
+    el.type = "checkbox";
+    applyProps(el, { checked: true });
+    expect(el.checked).toBe(true);
+    applyProps(el, { checked: false });
+    expect(el.checked).toBe(false);
+  });
+
+  it("sets selected via DOM property", () => {
+    const el = document.createElement("option");
+    applyProps(el, { selected: true });
+    expect(el.selected).toBe(true);
+    applyProps(el, { selected: false });
+    expect(el.selected).toBe(false);
+  });
 });

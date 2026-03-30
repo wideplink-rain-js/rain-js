@@ -232,6 +232,32 @@ describe("reconciler", () => {
     expect(fiber.rendered).toBeDefined();
   });
 
+  it("updates input value via DOM property on reconcile", () => {
+    const old = createElement("input", { value: "old" });
+    const fiber = makeFiberFromVnode(old, container);
+
+    const input = container.firstChild as HTMLInputElement;
+    input.value = "typed-by-user";
+
+    const updated = createElement("input", { value: "" });
+    reconcile(container, fiber, updated);
+
+    expect(input.value).toBe("");
+  });
+
+  it("resets checked via DOM property when prop is removed", () => {
+    const old = createElement("input", { type: "checkbox", checked: true });
+    const fiber = makeFiberFromVnode(old, container);
+
+    const input = container.firstChild as HTMLInputElement;
+    expect(input.checked).toBe(true);
+
+    const updated = createElement("input", { type: "checkbox" });
+    reconcile(container, fiber, updated);
+
+    expect(input.checked).toBe(false);
+  });
+
   it("supports multiple re-renders via scheduler", () => {
     let renderCount = 0;
     let setTitle: (v: string) => void = () => undefined;
