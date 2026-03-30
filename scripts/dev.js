@@ -1,7 +1,12 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
-const { generate, regenerateClient, copyPublicToStatic, ROUTES_DIR } = require("./generate");
+const {
+  generate,
+  regenerateClient,
+  copyPublicToStatic,
+  ROUTES_DIR,
+} = require("./generate");
 const { printBanner } = require("../cli/utils/banner");
 
 const SRC_DIR = path.join(process.cwd(), "src");
@@ -88,15 +93,11 @@ try {
       },
     );
     publicWatcher.on("error", () => {
-      console.error(
-        "[Rain] Warning: Public file watcher error.",
-      );
+      console.error("[Rain] Warning: Public file watcher error.");
     });
   }
 } catch (_publicWatchError) {
-  console.error(
-    "[Rain] Warning: Failed to start public file watcher.",
-  );
+  console.error("[Rain] Warning: Failed to start public file watcher.");
 }
 console.log("[watch] Watching public/ for static asset changes...");
 

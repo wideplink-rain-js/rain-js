@@ -303,11 +303,7 @@ function copyDirSync(src, dest) {
 
 function copyPublicToStatic() {
   const publicDir = path.join(PROJECT_ROOT, "public");
-  const staticDir = path.join(
-    PROJECT_ROOT,
-    BUILD_CONFIG.outDir,
-    "static",
-  );
+  const staticDir = path.join(PROJECT_ROOT, BUILD_CONFIG.outDir, "static");
   if (!fs.existsSync(publicDir)) return;
   copyDirSync(publicDir, staticDir);
 }
@@ -323,11 +319,7 @@ function bundleClientFilesSync(clientFiles, srcDir, fwPkg) {
     return [];
   }
 
-  const staticDir = path.join(
-    PROJECT_ROOT,
-    BUILD_CONFIG.outDir,
-    "static",
-  );
+  const staticDir = path.join(PROJECT_ROOT, BUILD_CONFIG.outDir, "static");
   const outDir = path.join(staticDir, "_rain");
   if (!fs.existsSync(outDir)) {
     fs.mkdirSync(outDir, { recursive: true });
