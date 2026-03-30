@@ -1,7 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
-const { generate, regenerateClient, ROUTES_DIR } = require("./generate");
+const { generate, regenerateClient, copyPublicToStatic, ROUTES_DIR } = require("./generate");
 const { printBanner } = require("../cli/utils/banner");
 
 const SRC_DIR = path.join(process.cwd(), "src");
@@ -71,6 +71,34 @@ try {
   console.error("[Rain] Warning: Failed to start client file watcher.");
 }
 console.log("[watch] Watching src/ for client component changes...");
+
+const PUBLIC_DIR = path.join(process.cwd(), "public");
+let publicDebounceTimer = null;
+try {
+  if (fs.existsSync(PUBLIC_DIR)) {
+    const publicWatcher = fs.watch(
+      PUBLIC_DIR,
+      { recursive: true },
+      (_eventType, filename) => {
+        clearTimeout(publicDebounceTimer);
+        publicDebounceTimer = setTimeout(() => {
+          console.log(`[watch:public] ${filename}`);
+          copyPublicToStatic();
+        }, 100);
+      },
+    );
+    publicWatcher.on("error", () => {
+      console.error(
+        "[Rain] Warning: Public file watcher error.",
+      );
+    });
+  }
+} catch (_publicWatchError) {
+  console.error(
+    "[Rain] Warning: Failed to start public file watcher.",
+  );
+}
+console.log("[watch] Watching public/ for static asset changes...");
 
 const wrangler = spawn("npx", ["wrangler", "dev"], {
   stdio: "inherit",

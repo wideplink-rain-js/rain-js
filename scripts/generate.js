@@ -286,6 +286,32 @@ function buildClientEsbuildAliases(fwPkg) {
   return {};
 }
 
+function copyDirSync(src, dest) {
+  if (!fs.existsSync(dest)) {
+    fs.mkdirSync(dest, { recursive: true });
+  }
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    if (entry.isDirectory()) {
+      copyDirSync(srcPath, destPath);
+    } else {
+      fs.copyFileSync(srcPath, destPath);
+    }
+  }
+}
+
+function copyPublicToStatic() {
+  const publicDir = path.join(PROJECT_ROOT, "public");
+  const staticDir = path.join(
+    PROJECT_ROOT,
+    BUILD_CONFIG.outDir,
+    "static",
+  );
+  if (!fs.existsSync(publicDir)) return;
+  copyDirSync(publicDir, staticDir);
+}
+
 function bundleClientFilesSync(clientFiles, srcDir, fwPkg) {
   if (clientFiles.length === 0) return [];
   if (!esbuild) {
@@ -297,7 +323,12 @@ function bundleClientFilesSync(clientFiles, srcDir, fwPkg) {
     return [];
   }
 
-  const outDir = path.join(PROJECT_ROOT, "public", "_rain");
+  const staticDir = path.join(
+    PROJECT_ROOT,
+    BUILD_CONFIG.outDir,
+    "static",
+  );
+  const outDir = path.join(staticDir, "_rain");
   if (!fs.existsSync(outDir)) {
     fs.mkdirSync(outDir, { recursive: true });
   }
@@ -334,11 +365,10 @@ function bundleClientFilesSync(clientFiles, srcDir, fwPkg) {
     loader: { ".ts": "ts", ".tsx": "tsx" },
   });
 
-  const publicDir = path.join(PROJECT_ROOT, "public");
   const scripts = [];
   for (const [outPath, meta] of Object.entries(result.metafile.outputs)) {
     if (meta.entryPoint) {
-      const relPath = path.relative(publicDir, outPath);
+      const relPath = path.relative(staticDir, outPath);
       scripts.push(`/${relPath.replace(/\\/g, "/")}`);
     }
   }
@@ -1129,6 +1159,7 @@ function generate() {
   const clientFiles = getClientFiles(srcDir);
   const hasConfig = fs.existsSync(CONFIG_FILE);
   const fwPkg = BUILD_CONFIG.frameworkPackage;
+  copyPublicToStatic();
   const clientScripts = bundleClientFilesSync(clientFiles, srcDir, fwPkg);
   const frameworkImport =
     fwPkg.startsWith(".") || fwPkg.startsWith("/")
@@ -1200,6 +1231,7 @@ module.exports = {
   clientFileToIslandId,
   bundleClientFilesSync,
   generateClientEntrySource,
+  copyPublicToStatic,
   validateNoPageRouteColocation,
   validateNoDuplicateUrls,
   stripRouteGroupSegments,

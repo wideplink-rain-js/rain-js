@@ -4,8 +4,13 @@ import type { Fiber } from "../../../src/framework/client/hooks";
 import {
   setCurrentFiber,
   setScheduleUpdate,
+  useState,
 } from "../../../src/framework/client/hooks";
 import { reconcile } from "../../../src/framework/client/reconciler";
+import {
+  flushSync,
+  initScheduler,
+} from "../../../src/framework/client/scheduler";
 import { createElement } from "../../../src/framework/jsx";
 
 // @vitest-environment jsdom
@@ -197,5 +202,83 @@ describe("reconciler", () => {
     reconcile(container, fiber, newRendered);
 
     expect((container.firstChild as HTMLElement).textContent).toBe("new");
+  });
+
+  it("preserves fiber.vnode after reconcile", () => {
+    function Comp(props: Record<string, unknown>) {
+      return createElement("div", null, props["text"] as string);
+    }
+
+    const vnode = createElement(Comp, { text: "init" });
+    setCurrentFiber(null);
+    const rendered = Comp({ text: "init" });
+    const dom = createDomNode(rendered as ReturnType<typeof createElement>);
+    container.appendChild(dom);
+
+    const fiber: Fiber = {
+      vnode,
+      dom,
+      hooks: [],
+      hookIndex: 0,
+      childFibers: [],
+      parent: null,
+    };
+
+    const newRendered = createElement("div", null, "updated");
+    reconcile(container, fiber, newRendered);
+
+    expect(fiber.vnode).toBe(vnode);
+    expect(fiber.vnode.tag).toBe(Comp);
+    expect(fiber.rendered).toBeDefined();
+  });
+
+  it("supports multiple re-renders via scheduler", () => {
+    let renderCount = 0;
+    let setTitle: (v: string) => void = () => undefined;
+    let setCount: (v: number) => void = () => undefined;
+
+    function App() {
+      renderCount++;
+      const [title, _setTitle] = useState("hello");
+      const [count, _setCount] = useState(0);
+      setTitle = _setTitle;
+      setCount = _setCount;
+      return createElement("div", null, `${title}-${count}`);
+    }
+
+    const vnode = createElement(App, null);
+    const fiber: Fiber = {
+      vnode,
+      dom: document.createElement("div"),
+      hooks: [],
+      hookIndex: 0,
+      childFibers: [],
+      parent: null,
+    };
+
+    initScheduler();
+
+    setCurrentFiber(fiber);
+    const initial = App();
+    setCurrentFiber(null);
+    const dom = createDomNode(initial as ReturnType<typeof createElement>);
+    container.appendChild(dom);
+    fiber.dom = dom;
+    fiber.rendered = initial as ReturnType<typeof createElement>;
+
+    expect(dom.textContent).toBe("hello-0");
+    renderCount = 0;
+
+    setTitle("");
+    flushSync();
+    expect(renderCount).toBe(1);
+    expect(fiber.dom.textContent).toBe("-0");
+    expect(typeof fiber.vnode.tag).toBe("function");
+
+    setCount(42);
+    flushSync();
+    expect(renderCount).toBe(2);
+    expect(fiber.dom.textContent).toBe("-42");
+    expect(typeof fiber.vnode.tag).toBe("function");
   });
 });

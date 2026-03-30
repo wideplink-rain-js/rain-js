@@ -310,5 +310,4 @@ export function reconcile(
   }
 
   fiber.rendered = resolved;
-  fiber.vnode = newVnode;
 }

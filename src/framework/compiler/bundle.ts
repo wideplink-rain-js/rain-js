@@ -16,6 +16,7 @@ export interface BundleOptions {
   minify?: boolean;
   clientEntrySource?: string;
   clientEntryDir?: string;
+  staticDir?: string;
 }
 
 export interface BundleManifest {
@@ -97,6 +98,7 @@ export async function bundleClientFiles(
     loader: { ".ts": "ts", ".tsx": "tsx" },
   });
 
-  const publicDir = resolve(options.projectRoot, "public");
-  return extractManifest(result.metafile, publicDir);
+  const staticRoot =
+    options.staticDir ?? resolve(options.projectRoot, "public");
+  return extractManifest(result.metafile, staticRoot);
 }
