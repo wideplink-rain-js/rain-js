@@ -19,6 +19,10 @@ const {
   detectAllExportsFromContent,
   clientFileToIslandId,
   detectUseClientDirective,
+  detectUseServerDirective,
+  extractServerFunctionsFromContent,
+  generateActionId,
+  serverActionImportName,
 } = require("../scripts/generate");
 
 describe("filePathToUrlPath", () => {
@@ -791,6 +795,206 @@ describe("detectUseClientDirective", () => {
     assert.strictEqual(
       detectUseClientDirective('"use server";\nexport function action() {}'),
       false,
+    );
+  });
+});
+
+describe("detectUseServerDirective", () => {
+  it("detects use server at file start", () => {
+    assert.strictEqual(
+      detectUseServerDirective('"use server";\nexport function action() {}'),
+      true,
+    );
+  });
+
+  it("returns false for non-directive", () => {
+    assert.strictEqual(
+      detectUseServerDirective("export function action() {}"),
+      false,
+    );
+  });
+
+  it("returns false for use client", () => {
+    assert.strictEqual(
+      detectUseServerDirective('"use client";\nexport function Counter() {}'),
+      false,
+    );
+  });
+
+  it("returns false for empty content", () => {
+    assert.strictEqual(detectUseServerDirective(""), false);
+  });
+});
+
+describe("extractServerFunctionsFromContent", () => {
+  it("detects file-level use server exported functions", () => {
+    const content = [
+      '"use server";',
+      "",
+      "export async function create(data: FormData) {",
+      "  return data;",
+      "}",
+      "",
+      "export async function remove(id: string) {",
+      "  return id;",
+      "}",
+      "",
+      "function privateHelper() {",
+      "  return null;",
+      "}",
+    ].join("\n");
+
+    const fns = extractServerFunctionsFromContent(content);
+    assert.strictEqual(fns.length, 2);
+    assert.deepStrictEqual(
+      fns.map((f) => f.name),
+      ["create", "remove"],
+    );
+    assert.strictEqual(fns[0].isExported, true);
+    assert.strictEqual(fns[0].isAsync, true);
+  });
+
+  it("detects function-level use server", () => {
+    const content = [
+      "export async function addUser(formData: FormData) {",
+      '  "use server";',
+      "  console.log(formData);",
+      "}",
+    ].join("\n");
+
+    const fns = extractServerFunctionsFromContent(content);
+    assert.strictEqual(fns.length, 1);
+    assert.strictEqual(fns[0].name, "addUser");
+    assert.strictEqual(fns[0].isExported, true);
+    assert.strictEqual(fns[0].isAsync, true);
+  });
+
+  it("detects arrow function with use server", () => {
+    const content = [
+      "export const deleteUser = async (id: string) => {",
+      '  "use server";',
+      "  console.log(id);",
+      "};",
+    ].join("\n");
+
+    const fns = extractServerFunctionsFromContent(content);
+    assert.strictEqual(fns.length, 1);
+    assert.strictEqual(fns[0].name, "deleteUser");
+  });
+
+  it("ignores functions without use server", () => {
+    const content = [
+      "export async function normalHandler(req: Request) {",
+      "  return new Response('ok');",
+      "}",
+    ].join("\n");
+
+    const fns = extractServerFunctionsFromContent(content);
+    assert.strictEqual(fns.length, 0);
+  });
+
+  it("returns empty for empty source", () => {
+    assert.strictEqual(extractServerFunctionsFromContent("").length, 0);
+  });
+
+  it("file-level use server ignores non-exported", () => {
+    const content = [
+      '"use server";',
+      "",
+      "function privateHelper() {",
+      "  return null;",
+      "}",
+    ].join("\n");
+
+    const fns = extractServerFunctionsFromContent(content);
+    assert.strictEqual(fns.length, 0);
+  });
+
+  it("detects multiple function-level use server", () => {
+    const content = [
+      "export async function addItem(fd: FormData) {",
+      '  "use server";',
+      "  return fd;",
+      "}",
+      "",
+      "export async function removeItem(fd: FormData) {",
+      '  "use server";',
+      "  return fd;",
+      "}",
+      "",
+      "export function normalRoute() {",
+      "  return new Response('ok');",
+      "}",
+    ].join("\n");
+
+    const fns = extractServerFunctionsFromContent(content);
+    assert.strictEqual(fns.length, 2);
+    assert.deepStrictEqual(
+      fns.map((f) => f.name),
+      ["addItem", "removeItem"],
+    );
+  });
+});
+
+describe("generateActionId", () => {
+  it("generates deterministic IDs", () => {
+    const id1 = generateActionId("src/routes/users/page.tsx", "addUser");
+    const id2 = generateActionId("src/routes/users/page.tsx", "addUser");
+    assert.strictEqual(id1, id2);
+  });
+
+  it("generates different IDs for different functions", () => {
+    const id1 = generateActionId("src/routes/page.tsx", "create");
+    const id2 = generateActionId("src/routes/page.tsx", "remove");
+    assert.notStrictEqual(id1, id2);
+  });
+
+  it("generates different IDs for different files", () => {
+    const id1 = generateActionId("src/routes/a/page.tsx", "action");
+    const id2 = generateActionId("src/routes/b/page.tsx", "action");
+    assert.notStrictEqual(id1, id2);
+  });
+
+  it("normalizes backslashes", () => {
+    const id1 = generateActionId("src\\routes\\page.tsx", "action");
+    const id2 = generateActionId("src/routes/page.tsx", "action");
+    assert.strictEqual(id1, id2);
+  });
+});
+
+describe("serverActionImportName", () => {
+  it("generates import name for simple path", () => {
+    assert.strictEqual(
+      serverActionImportName("actions/todos.ts"),
+      "sa_actions_todos",
+    );
+  });
+
+  it("generates import name for nested path", () => {
+    assert.strictEqual(
+      serverActionImportName("routes/user/actions.ts"),
+      "sa_routes_user_actions",
+    );
+  });
+
+  it("handles tsx extension", () => {
+    assert.strictEqual(
+      serverActionImportName("routes/page.tsx"),
+      "sa_routes_page",
+    );
+  });
+
+  it("handles dynamic segments", () => {
+    assert.strictEqual(
+      serverActionImportName("routes/[id]/actions.ts"),
+      "sa_routes_$id_actions",
+    );
+  });
+
+  it("handles hyphens", () => {
+    assert.strictEqual(
+      serverActionImportName("my-actions/todos.ts"),
+      "sa_my_actions_todos",
     );
   });
 });

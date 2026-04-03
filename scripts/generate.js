@@ -190,6 +190,161 @@ function detectUseClientDirective(content) {
   );
 }
 
+function detectUseServerDirective(content) {
+  const sourceFile = ts.createSourceFile(
+    "file.tsx",
+    content,
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const firstStatement = sourceFile.statements[0];
+  if (!firstStatement) return false;
+  return (
+    ts.isExpressionStatement(firstStatement) &&
+    ts.isStringLiteral(firstStatement.expression) &&
+    firstStatement.expression.text === "use server"
+  );
+}
+
+function hasUseServerInBody(body) {
+  if (!body || body.statements.length === 0) return false;
+  const first = body.statements[0];
+  if (!first) return false;
+  return (
+    ts.isExpressionStatement(first) &&
+    ts.isStringLiteral(first.expression) &&
+    first.expression.text === "use server"
+  );
+}
+
+function hasAsyncModifier(node) {
+  const modifiers = ts.canHaveModifiers(node)
+    ? ts.getModifiers(node)
+    : undefined;
+  return modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) ?? false;
+}
+
+function extractFromFunctionDecl(stmt, fileLevel) {
+  if (!(ts.isFunctionDeclaration(stmt) && stmt.name)) return null;
+  const isExported = hasExportKeyword(stmt);
+  if (fileLevel && isExported) {
+    return {
+      name: stmt.name.text,
+      isExported: true,
+      isAsync: hasAsyncModifier(stmt),
+    };
+  }
+  if (hasUseServerInBody(stmt.body)) {
+    return {
+      name: stmt.name.text,
+      isExported,
+      isAsync: hasAsyncModifier(stmt),
+    };
+  }
+  return null;
+}
+
+function isServerFunctionInit(init) {
+  return ts.isArrowFunction(init) || ts.isFunctionExpression(init);
+}
+
+function extractFromVariableStmt(stmt, fileLevel) {
+  if (!ts.isVariableStatement(stmt)) return [];
+  const stmtExported = hasExportKeyword(stmt);
+  const results = [];
+  for (const decl of stmt.declarationList.declarations) {
+    if (!(decl.name && ts.isIdentifier(decl.name))) continue;
+    const init = decl.initializer;
+    if (!(init && isServerFunctionInit(init))) continue;
+
+    const isServer = fileLevel
+      ? stmtExported
+      : ts.isBlock(init.body) && hasUseServerInBody(init.body);
+
+    if (isServer) {
+      results.push({
+        name: decl.name.text,
+        isExported: stmtExported,
+        isAsync: hasAsyncModifier(init),
+      });
+    }
+  }
+  return results;
+}
+
+function extractServerFunctionsFromContent(content) {
+  const sourceFile = ts.createSourceFile(
+    "file.tsx",
+    content,
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const fileLevel = detectUseServerDirective(content);
+  const results = [];
+
+  ts.forEachChild(sourceFile, (stmt) => {
+    const funcResult = extractFromFunctionDecl(stmt, fileLevel);
+    if (funcResult) results.push(funcResult);
+    results.push(...extractFromVariableStmt(stmt, fileLevel));
+  });
+
+  return results;
+}
+
+function isServerActionFile(fullPath, name) {
+  if (name.startsWith("_type-test")) return false;
+  const content = fs.readFileSync(fullPath, "utf-8");
+  if (!content.includes("use server")) return false;
+  const functions = extractServerFunctionsFromContent(content);
+  return functions.some((f) => f.isExported);
+}
+
+function getServerActionFiles(dir, base = "") {
+  if (!fs.existsSync(dir)) return [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  const files = [];
+
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    const relativePath = path.join(base, entry.name);
+
+    if (entry.isDirectory()) {
+      if (entry.name === "node_modules" || entry.name === ".rainjs") continue;
+      files.push(...getServerActionFiles(fullPath, relativePath));
+    } else if (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) {
+      if (isServerActionFile(fullPath, entry.name)) {
+        files.push(relativePath);
+      }
+    }
+  }
+
+  return files;
+}
+
+function generateActionId(filePath, functionName) {
+  const input = `${filePath.replace(/\\/g, "/")}:${functionName}`;
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function serverActionImportName(filePath) {
+  return (
+    "sa_" +
+    filePath
+      .replace(/\.tsx?$/, "")
+      .replace(/\\/g, "_")
+      .replace(/\//g, "_")
+      .replace(/\[/g, "$")
+      .replace(/\]/g, "")
+      .replace(/[()]/g, "")
+      .replace(/-/g, "_")
+  );
+}
+
 function getClientFiles(dir, base = "") {
   if (!fs.existsSync(dir)) return [];
   const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -872,6 +1027,49 @@ function processPages(
   }
 }
 
+function processServerActions(
+  serverActionFiles,
+  srcDir,
+  frameworkImport,
+  imports,
+  registrations,
+) {
+  if (serverActionFiles.length === 0) return;
+
+  imports.push(`import { markAsServerAction } from "${frameworkImport}";`);
+
+  for (const file of serverActionFiles) {
+    const fullPath = path.join(srcDir, file);
+    const content = fs.readFileSync(fullPath, "utf-8");
+    const functions = extractServerFunctionsFromContent(content);
+    const exportedFunctions = functions.filter((f) => f.isExported);
+
+    if (exportedFunctions.length === 0) continue;
+
+    const importName = serverActionImportName(file);
+    const importPath = relativeImportPath(
+      path.join(srcDir, file.replace(/\.tsx?$/, "")),
+    );
+
+    const importSpecifiers = exportedFunctions
+      .map((f) => `${f.name} as ${importName}_${f.name}`)
+      .join(", ");
+    imports.push(`import { ${importSpecifiers} } from "${importPath}";`);
+
+    const relFromRoot = path.join("src", file).replace(/\\/g, "/");
+
+    for (const fn of exportedFunctions) {
+      const actionId = generateActionId(relFromRoot, fn.name);
+      registrations.push(
+        `markAsServerAction("${actionId}", ${importName}_${fn.name});`,
+      );
+      registrations.push(
+        `app.registerAction("${actionId}", ${importName}_${fn.name});`,
+      );
+    }
+  }
+}
+
 function validateCompatibilityFlags() {
   const wranglerPath = path.join(PROJECT_ROOT, "wrangler.toml");
   if (!fs.existsSync(wranglerPath)) return;
@@ -1088,6 +1286,7 @@ function generate() {
   );
 
   const srcDir = path.join(PROJECT_ROOT, "src");
+  const serverActionFiles = getServerActionFiles(srcDir);
   const clientFiles = getClientFiles(srcDir);
   const hasConfig = fs.existsSync(CONFIG_FILE);
   const fwPkg = BUILD_CONFIG.frameworkPackage;
@@ -1103,6 +1302,14 @@ function generate() {
     clientFiles,
     srcDir,
     frameworkImport,
+  );
+
+  processServerActions(
+    serverActionFiles,
+    srcDir,
+    frameworkImport,
+    imports,
+    registrations,
   );
 
   const headerImports = [`import { Rain } from "${frameworkImport}";`];
@@ -1137,8 +1344,10 @@ function generate() {
   const total = files.length + pageFiles.length;
   const clientMsg =
     clientFiles.length > 0 ? `, ${clientFiles.length} client` : "";
+  const actionMsg =
+    serverActionFiles.length > 0 ? `, ${serverActionFiles.length} action` : "";
   console.log(
-    `[gen] ${total} route(s) (${files.length} api, ${pageFiles.length} page, ${layoutFiles.length} layout${clientMsg}) -> .rainjs/entry.ts`,
+    `[gen] ${total} route(s) (${files.length} api, ${pageFiles.length} page, ${layoutFiles.length} layout${clientMsg}${actionMsg}) -> .rainjs/entry.ts`,
   );
 }
 
@@ -1151,6 +1360,7 @@ module.exports = {
   getPageFiles,
   getLayoutFiles,
   getClientFiles,
+  getServerActionFiles,
   getMiddlewaresForRoute,
   getLayoutsForPage,
   filePathToUrlPath,
@@ -1159,6 +1369,7 @@ module.exports = {
   pageFilePathToImportName,
   middlewareImportName,
   layoutImportName,
+  serverActionImportName,
   detectExportedMethods,
   detectExportedMethodsFromContent,
   detectMiddlewareExport,
@@ -1166,7 +1377,10 @@ module.exports = {
   detectDefaultExport,
   detectDefaultExportFromContent,
   detectUseClientDirective,
+  detectUseServerDirective,
   detectAllExportsFromContent,
+  extractServerFunctionsFromContent,
+  generateActionId,
   generateIslandMarkLines,
   cleanupLegacyIslandArtifacts,
   clientFileToIslandId,
