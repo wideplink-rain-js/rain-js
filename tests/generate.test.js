@@ -21,7 +21,7 @@ const {
   detectUseClientDirective,
   detectUseServerDirective,
   extractServerFunctionsFromContent,
-  generateActionHash,
+  generateActionId,
   serverActionImportName,
 } = require("../scripts/generate");
 
@@ -802,14 +802,14 @@ describe("detectUseClientDirective", () => {
 describe("detectUseServerDirective", () => {
   it("detects use server at file start", () => {
     assert.strictEqual(
-      detectUseServerDirective('"use server";\nexport function create() {}'),
+      detectUseServerDirective('"use server";\nexport function action() {}'),
       true,
     );
   });
 
   it("returns false for non-directive", () => {
     assert.strictEqual(
-      detectUseServerDirective("export function create() {}"),
+      detectUseServerDirective("export function action() {}"),
       false,
     );
   });
@@ -821,101 +821,103 @@ describe("detectUseServerDirective", () => {
     );
   });
 
-  it("returns false for empty source", () => {
+  it("returns false for empty content", () => {
     assert.strictEqual(detectUseServerDirective(""), false);
   });
 });
 
 describe("extractServerFunctionsFromContent", () => {
-  it("extracts all exported functions with file-level use server", () => {
-    const source = [
+  it("detects file-level use server exported functions", () => {
+    const content = [
       '"use server";',
       "",
-      "export async function createUser(ctx, formData) {",
-      "  return new Response('ok');",
+      "export async function create(data: FormData) {",
+      "  return data;",
       "}",
       "",
-      "export async function deleteUser(ctx, formData) {",
-      "  return new Response('ok');",
-      "}",
-      "",
-      "function privateHelper() {",
-      "  return null;",
-      "}",
-    ].join("\n");
-
-    const fns = extractServerFunctionsFromContent(source);
-    assert.deepStrictEqual(fns, ["createUser", "deleteUser"]);
-  });
-
-  it("extracts function with inline use server", () => {
-    const source = [
-      'export async function addItem(formData: FormData) {',
-      '  "use server";',
-      "  return formData;",
-      "}",
-    ].join("\n");
-
-    const fns = extractServerFunctionsFromContent(source);
-    assert.deepStrictEqual(fns, ["addItem"]);
-  });
-
-  it("extracts arrow function with inline use server", () => {
-    const source = [
-      "export const deleteItem = async (id: string) => {",
-      '  "use server";',
+      "export async function remove(id: string) {",
       "  return id;",
-      "};",
-    ].join("\n");
-
-    const fns = extractServerFunctionsFromContent(source);
-    assert.deepStrictEqual(fns, ["deleteItem"]);
-  });
-
-  it("extracts exported arrow with file-level use server", () => {
-    const source = [
-      '"use server";',
-      "",
-      "export const handler = async () => {",
-      "  return null;",
-      "};",
-    ].join("\n");
-
-    const fns = extractServerFunctionsFromContent(source);
-    assert.deepStrictEqual(fns, ["handler"]);
-  });
-
-  it("ignores non-exported with file-level use server", () => {
-    const source = [
-      '"use server";',
+      "}",
       "",
       "function privateHelper() {",
       "  return null;",
       "}",
     ].join("\n");
 
-    const fns = extractServerFunctionsFromContent(source);
-    assert.deepStrictEqual(fns, []);
+    const fns = extractServerFunctionsFromContent(content);
+    assert.strictEqual(fns.length, 2);
+    assert.deepStrictEqual(
+      fns.map((f) => f.name),
+      ["create", "remove"],
+    );
+    assert.strictEqual(fns[0].isExported, true);
+    assert.strictEqual(fns[0].isAsync, true);
+  });
+
+  it("detects function-level use server", () => {
+    const content = [
+      "export async function addUser(formData: FormData) {",
+      '  "use server";',
+      "  console.log(formData);",
+      "}",
+    ].join("\n");
+
+    const fns = extractServerFunctionsFromContent(content);
+    assert.strictEqual(fns.length, 1);
+    assert.strictEqual(fns[0].name, "addUser");
+    assert.strictEqual(fns[0].isExported, true);
+    assert.strictEqual(fns[0].isAsync, true);
+  });
+
+  it("detects arrow function with use server", () => {
+    const content = [
+      "export const deleteUser = async (id: string) => {",
+      '  "use server";',
+      "  console.log(id);",
+      "};",
+    ].join("\n");
+
+    const fns = extractServerFunctionsFromContent(content);
+    assert.strictEqual(fns.length, 1);
+    assert.strictEqual(fns[0].name, "deleteUser");
   });
 
   it("ignores functions without use server", () => {
-    const source = [
+    const content = [
       "export async function normalHandler(req: Request) {",
       "  return new Response('ok');",
       "}",
     ].join("\n");
 
-    const fns = extractServerFunctionsFromContent(source);
-    assert.deepStrictEqual(fns, []);
+    const fns = extractServerFunctionsFromContent(content);
+    assert.strictEqual(fns.length, 0);
   });
 
   it("returns empty for empty source", () => {
-    assert.deepStrictEqual(extractServerFunctionsFromContent(""), []);
+    assert.strictEqual(extractServerFunctionsFromContent("").length, 0);
   });
 
-  it("handles mixed inline and non-server functions", () => {
-    const source = [
+  it("file-level use server ignores non-exported", () => {
+    const content = [
+      '"use server";',
+      "",
+      "function privateHelper() {",
+      "  return null;",
+      "}",
+    ].join("\n");
+
+    const fns = extractServerFunctionsFromContent(content);
+    assert.strictEqual(fns.length, 0);
+  });
+
+  it("detects multiple function-level use server", () => {
+    const content = [
       "export async function addItem(fd: FormData) {",
+      '  "use server";',
+      "  return fd;",
+      "}",
+      "",
+      "export async function removeItem(fd: FormData) {",
       '  "use server";',
       "  return fd;",
       "}",
@@ -923,40 +925,39 @@ describe("extractServerFunctionsFromContent", () => {
       "export function normalRoute() {",
       "  return new Response('ok');",
       "}",
-      "",
-      "export async function removeItem(fd: FormData) {",
-      '  "use server";',
-      "  return fd;",
-      "}",
     ].join("\n");
 
-    const fns = extractServerFunctionsFromContent(source);
-    assert.deepStrictEqual(fns, ["addItem", "removeItem"]);
+    const fns = extractServerFunctionsFromContent(content);
+    assert.strictEqual(fns.length, 2);
+    assert.deepStrictEqual(
+      fns.map((f) => f.name),
+      ["addItem", "removeItem"],
+    );
   });
 });
 
-describe("generateActionHash", () => {
+describe("generateActionId", () => {
   it("generates deterministic IDs", () => {
-    const id1 = generateActionHash("routes/user/actions.ts", "createUser");
-    const id2 = generateActionHash("routes/user/actions.ts", "createUser");
+    const id1 = generateActionId("src/routes/users/page.tsx", "addUser");
+    const id2 = generateActionId("src/routes/users/page.tsx", "addUser");
     assert.strictEqual(id1, id2);
   });
 
   it("generates different IDs for different functions", () => {
-    const id1 = generateActionHash("routes/actions.ts", "create");
-    const id2 = generateActionHash("routes/actions.ts", "remove");
+    const id1 = generateActionId("src/routes/page.tsx", "create");
+    const id2 = generateActionId("src/routes/page.tsx", "remove");
     assert.notStrictEqual(id1, id2);
   });
 
   it("generates different IDs for different files", () => {
-    const id1 = generateActionHash("routes/a/actions.ts", "action");
-    const id2 = generateActionHash("routes/b/actions.ts", "action");
+    const id1 = generateActionId("src/routes/a/page.tsx", "action");
+    const id2 = generateActionId("src/routes/b/page.tsx", "action");
     assert.notStrictEqual(id1, id2);
   });
 
   it("normalizes backslashes", () => {
-    const id1 = generateActionHash("routes\\actions.ts", "action");
-    const id2 = generateActionHash("routes/actions.ts", "action");
+    const id1 = generateActionId("src\\routes\\page.tsx", "action");
+    const id2 = generateActionId("src/routes/page.tsx", "action");
     assert.strictEqual(id1, id2);
   });
 });
@@ -964,8 +965,22 @@ describe("generateActionHash", () => {
 describe("serverActionImportName", () => {
   it("generates import name for simple path", () => {
     assert.strictEqual(
+      serverActionImportName("actions/todos.ts"),
+      "sa_actions_todos",
+    );
+  });
+
+  it("generates import name for nested path", () => {
+    assert.strictEqual(
       serverActionImportName("routes/user/actions.ts"),
       "sa_routes_user_actions",
+    );
+  });
+
+  it("handles tsx extension", () => {
+    assert.strictEqual(
+      serverActionImportName("routes/page.tsx"),
+      "sa_routes_page",
     );
   });
 
@@ -976,17 +991,10 @@ describe("serverActionImportName", () => {
     );
   });
 
-  it("handles tsx extension", () => {
+  it("handles hyphens", () => {
     assert.strictEqual(
-      serverActionImportName("routes/todo/actions.tsx"),
-      "sa_routes_todo_actions",
-    );
-  });
-
-  it("handles hyphenated names", () => {
-    assert.strictEqual(
-      serverActionImportName("routes/my-app/actions.ts"),
-      "sa_routes_my_app_actions",
+      serverActionImportName("my-actions/todos.ts"),
+      "sa_my_actions_todos",
     );
   });
 });
