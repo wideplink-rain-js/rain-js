@@ -213,6 +213,183 @@ function getClientFiles(dir, base = "") {
   return files;
 }
 
+function detectUseServerDirective(content) {
+  const sourceFile = ts.createSourceFile(
+    "file.tsx",
+    content,
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const firstStatement = sourceFile.statements[0];
+  if (!firstStatement) return false;
+  return (
+    ts.isExpressionStatement(firstStatement) &&
+    ts.isStringLiteral(firstStatement.expression) &&
+    firstStatement.expression.text === "use server"
+  );
+}
+
+function hasUseServerInFunctionBody(body) {
+  if (!body?.statements || body.statements.length === 0) {
+    return false;
+  }
+  const first = body.statements[0];
+  return (
+    ts.isExpressionStatement(first) &&
+    ts.isStringLiteral(first.expression) &&
+    first.expression.text === "use server"
+  );
+}
+
+function extractServerFuncDecl(stmt, fileLevel) {
+  if (!(ts.isFunctionDeclaration(stmt) && stmt.name)) return null;
+  const exported = hasExportKeyword(stmt);
+  if (fileLevel && exported) return stmt.name.text;
+  if (hasUseServerInFunctionBody(stmt.body)) return stmt.name.text;
+  return null;
+}
+
+function isServerVarDecl(init, stmtExported, fileLevel) {
+  if (!(ts.isArrowFunction(init) || ts.isFunctionExpression(init))) {
+    return false;
+  }
+  if (fileLevel && stmtExported) return true;
+  return ts.isBlock(init.body) && hasUseServerInFunctionBody(init.body);
+}
+
+function extractServerVarDecls(stmt, fileLevel) {
+  if (!ts.isVariableStatement(stmt)) return [];
+  const exported = hasExportKeyword(stmt);
+  const results = [];
+  for (const decl of stmt.declarationList.declarations) {
+    if (!(decl.name && ts.isIdentifier(decl.name))) continue;
+    const init = decl.initializer;
+    if (!init) continue;
+    if (isServerVarDecl(init, exported, fileLevel)) {
+      results.push(decl.name.text);
+    }
+  }
+  return results;
+}
+
+function extractServerFunctionsFromContent(content) {
+  const sourceFile = ts.createSourceFile(
+    "file.tsx",
+    content,
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const fileLevel = detectUseServerDirective(content);
+  const results = [];
+
+  for (const stmt of sourceFile.statements) {
+    const funcName = extractServerFuncDecl(stmt, fileLevel);
+    if (funcName) results.push(funcName);
+    results.push(...extractServerVarDecls(stmt, fileLevel));
+  }
+  return results;
+}
+
+const SPECIAL_FILE_NAMES = new Set([
+  "route.ts",
+  "route.tsx",
+  "page.ts",
+  "page.tsx",
+  "layout.ts",
+  "layout.tsx",
+  "_middleware.ts",
+]);
+
+function getServerActionFiles(dir, base = "") {
+  if (!fs.existsSync(dir)) return [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  const files = [];
+
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    const relativePath = path.join(base, entry.name);
+
+    if (entry.isDirectory()) {
+      if (entry.name === "node_modules" || entry.name === ".rainjs") {
+        continue;
+      }
+      files.push(...getServerActionFiles(fullPath, relativePath));
+    } else if (
+      (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) &&
+      !entry.name.startsWith("_") &&
+      !SPECIAL_FILE_NAMES.has(entry.name)
+    ) {
+      const content = fs.readFileSync(fullPath, "utf-8");
+      const fns = extractServerFunctionsFromContent(content);
+      if (fns.length > 0) {
+        files.push(relativePath);
+      }
+    }
+  }
+
+  return files;
+}
+
+function generateActionHash(filePath, functionName) {
+  const input = `${filePath.replace(/\\/g, "/")}:${functionName}`;
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function serverActionImportName(filePath) {
+  return (
+    "sa_" +
+    filePath
+      .replace(/\.tsx?$/, "")
+      .replace(/\\/g, "_")
+      .replace(/\//g, "_")
+      .replace(/\[/g, "$")
+      .replace(/\]/g, "")
+      .replace(/[()]/g, "")
+      .replace(/-/g, "_")
+  );
+}
+
+function processServerActions(
+  serverActionFiles,
+  srcDir,
+  imports,
+  registrations,
+) {
+  if (serverActionFiles.length === 0) return;
+  for (const file of serverActionFiles) {
+    const fullPath = path.join(srcDir, file);
+    const content = fs.readFileSync(fullPath, "utf-8");
+    const fns = extractServerFunctionsFromContent(content);
+    if (fns.length === 0) continue;
+
+    const baseName = serverActionImportName(file);
+    const importPath = relativeImportPath(
+      path.join(srcDir, file.replace(/\.tsx?$/, "")),
+    );
+
+    const specifiers = fns
+      .map((fn) => `${fn} as ${baseName}_${fn}`)
+      .join(", ");
+    imports.push(`import { ${specifiers} } from "${importPath}";`);
+
+    for (const fn of fns) {
+      const alias = `${baseName}_${fn}`;
+      const actionId = generateActionHash(file, fn);
+      registrations.push(
+        `markAsServerAction("${actionId}", ${alias});`,
+      );
+      registrations.push(
+        `app.registerAction("${actionId}", ${alias});`,
+      );
+    }
+  }
+}
+
 function ensureRelativeImport(importPath) {
   return importPath.startsWith(".") ? importPath : `./${importPath}`;
 }
@@ -1089,6 +1266,7 @@ function generate() {
 
   const srcDir = path.join(PROJECT_ROOT, "src");
   const clientFiles = getClientFiles(srcDir);
+  const serverActionFiles = getServerActionFiles(srcDir);
   const hasConfig = fs.existsSync(CONFIG_FILE);
   const fwPkg = BUILD_CONFIG.frameworkPackage;
   copyPublicToStatic();
@@ -1098,6 +1276,13 @@ function generate() {
       ? relativeImportPath(path.join(PROJECT_ROOT, fwPkg))
       : fwPkg;
 
+  processServerActions(
+    serverActionFiles,
+    srcDir,
+    imports,
+    registrations,
+  );
+
   cleanupLegacyIslandArtifacts();
   const islandMarkLines = generateIslandMarkLines(
     clientFiles,
@@ -1105,7 +1290,12 @@ function generate() {
     frameworkImport,
   );
 
-  const headerImports = [`import { Rain } from "${frameworkImport}";`];
+  const hasServerActions = serverActionFiles.length > 0;
+  const headerImports = [
+    hasServerActions
+      ? `import { Rain, markAsServerAction } from "${frameworkImport}";`
+      : `import { Rain } from "${frameworkImport}";`,
+  ];
   if (hasConfig) {
     const configPath = relativeImportPath(
       path.join(PROJECT_ROOT, "rain.config"),
@@ -1137,8 +1327,12 @@ function generate() {
   const total = files.length + pageFiles.length;
   const clientMsg =
     clientFiles.length > 0 ? `, ${clientFiles.length} client` : "";
+  const actionMsg =
+    serverActionFiles.length > 0
+      ? `, ${serverActionFiles.length} action`
+      : "";
   console.log(
-    `[gen] ${total} route(s) (${files.length} api, ${pageFiles.length} page, ${layoutFiles.length} layout${clientMsg}) -> .rainjs/entry.ts`,
+    `[gen] ${total} route(s) (${files.length} api, ${pageFiles.length} page, ${layoutFiles.length} layout${clientMsg}${actionMsg}) -> .rainjs/entry.ts`,
   );
 }
 
@@ -1166,7 +1360,12 @@ module.exports = {
   detectDefaultExport,
   detectDefaultExportFromContent,
   detectUseClientDirective,
+  detectUseServerDirective,
   detectAllExportsFromContent,
+  extractServerFunctionsFromContent,
+  getServerActionFiles,
+  generateActionHash,
+  serverActionImportName,
   generateIslandMarkLines,
   cleanupLegacyIslandArtifacts,
   clientFileToIslandId,

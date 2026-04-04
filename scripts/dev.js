@@ -6,6 +6,7 @@ const {
   regenerateClient,
   copyPublicToStatic,
   ROUTES_DIR,
+  getServerActionFiles,
 } = require("./generate");
 const { printBanner } = require("../cli/utils/banner");
 
@@ -54,6 +55,7 @@ try {
 console.log("[watch] Watching src/routes/ for changes...");
 
 let clientDebounceTimer = null;
+let prevActionCount = getServerActionFiles(SRC_DIR).length;
 try {
   const clientWatcher = fs.watch(
     SRC_DIR,
@@ -63,8 +65,15 @@ try {
       if (filename.startsWith("routes")) return;
       clearTimeout(clientDebounceTimer);
       clientDebounceTimer = setTimeout(() => {
-        console.log(`[watch:client] ${eventType}: ${filename}`);
-        regenerateClient();
+        const currentActions = getServerActionFiles(SRC_DIR).length;
+        if (currentActions === prevActionCount) {
+          console.log(`[watch:client] ${eventType}: ${filename}`);
+          regenerateClient();
+        } else {
+          prevActionCount = currentActions;
+          console.log(`[watch:action] ${eventType}: ${filename}`);
+          generate();
+        }
       }, 200);
     },
   );
