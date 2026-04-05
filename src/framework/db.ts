@@ -1,6 +1,6 @@
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { drizzle } from "drizzle-orm/d1";
-import { bindings } from "./bindings";
+import { bindings, requestLocal } from "./bindings";
 
 interface D1Env {
   DB: D1Database;
@@ -10,6 +10,14 @@ interface DbOptions<S extends Record<string, unknown> = Record<string, never>> {
   schema?: S;
   d1?: D1Database;
 }
+
+interface DbCacheEntry {
+  d1: D1Database;
+  schema: Record<string, unknown> | undefined;
+  instance: DrizzleD1Database<Record<string, unknown>>;
+}
+
+const DB_CACHE_KEY = Symbol.for("rain.db.cache");
 
 function isDbOptions(value: unknown): value is DbOptions {
   return (
@@ -35,6 +43,30 @@ function resolveD1(d1?: D1Database): D1Database {
   return resolved;
 }
 
+function cachedDrizzle<S extends Record<string, unknown>>(
+  d1: D1Database,
+  schema?: S,
+): DrizzleD1Database<S> {
+  const cache = requestLocal<DbCacheEntry[]>(
+    DB_CACHE_KEY,
+    () => [],
+  );
+  const found = cache.find(
+    (e) => e.d1 === d1 && e.schema === schema,
+  );
+  if (found) return found.instance as DrizzleD1Database<S>;
+  const instance = (
+    schema ? drizzle(d1, { schema }) : drizzle(d1)
+  ) as unknown as DrizzleD1Database<S>;
+  cache.push({
+    d1,
+    schema,
+    instance:
+      instance as DrizzleD1Database<Record<string, unknown>>,
+  });
+  return instance;
+}
+
 export function db(): DrizzleD1Database;
 export function db(d1: D1Database): DrizzleD1Database;
 export function db<S extends Record<string, unknown>>(
@@ -45,11 +77,12 @@ export function db<S extends Record<string, unknown>>(
 ): DrizzleD1Database<S> {
   if (isDbOptions(d1OrOptions)) {
     const resolved = resolveD1(d1OrOptions.d1);
-    return (d1OrOptions.schema
-      ? drizzle(resolved, { schema: d1OrOptions.schema })
-      : drizzle(resolved)) as unknown as DrizzleD1Database<S>;
+    return cachedDrizzle(
+      resolved,
+      d1OrOptions.schema as S | undefined,
+    );
   }
-  return drizzle(
+  return cachedDrizzle(
     resolveD1(d1OrOptions as D1Database | undefined),
-  ) as unknown as DrizzleD1Database<S>;
+  );
 }

@@ -1,4 +1,4 @@
-export { bindings } from "./bindings";
+export { bindings, requestLocal } from "./bindings";
 export type { ScriptDescriptor } from "./compiler/inject";
 export { injectScripts } from "./compiler/inject";
 export { Context } from "./context";
