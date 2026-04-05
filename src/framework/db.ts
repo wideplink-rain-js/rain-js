@@ -47,22 +47,16 @@ function cachedDrizzle<S extends Record<string, unknown>>(
   d1: D1Database,
   schema?: S,
 ): DrizzleD1Database<S> {
-  const cache = requestLocal<DbCacheEntry[]>(
-    DB_CACHE_KEY,
-    () => [],
-  );
-  const found = cache.find(
-    (e) => e.d1 === d1 && e.schema === schema,
-  );
+  const cache = requestLocal<DbCacheEntry[]>(DB_CACHE_KEY, () => []);
+  const found = cache.find((e) => e.d1 === d1 && e.schema === schema);
   if (found) return found.instance as DrizzleD1Database<S>;
-  const instance = (
-    schema ? drizzle(d1, { schema }) : drizzle(d1)
-  ) as unknown as DrizzleD1Database<S>;
+  const instance = (schema
+    ? drizzle(d1, { schema })
+    : drizzle(d1)) as unknown as DrizzleD1Database<S>;
   cache.push({
     d1,
     schema,
-    instance:
-      instance as DrizzleD1Database<Record<string, unknown>>,
+    instance: instance as DrizzleD1Database<Record<string, unknown>>,
   });
   return instance;
 }
@@ -77,12 +71,7 @@ export function db<S extends Record<string, unknown>>(
 ): DrizzleD1Database<S> {
   if (isDbOptions(d1OrOptions)) {
     const resolved = resolveD1(d1OrOptions.d1);
-    return cachedDrizzle(
-      resolved,
-      d1OrOptions.schema as S | undefined,
-    );
+    return cachedDrizzle(resolved, d1OrOptions.schema as S | undefined);
   }
-  return cachedDrizzle(
-    resolveD1(d1OrOptions as D1Database | undefined),
-  );
+  return cachedDrizzle(resolveD1(d1OrOptions as D1Database | undefined));
 }

@@ -8,10 +8,7 @@ interface RequestStore {
 const requestStorage = new AsyncLocalStorage<RequestStore>();
 
 export function runWithBindings<T>(env: unknown, fn: () => T): T {
-  return requestStorage.run(
-    { env, locals: new Map() },
-    fn,
-  );
+  return requestStorage.run({ env, locals: new Map() }, fn);
 }
 
 export function bindings<E = Env>(): E {
@@ -28,10 +25,7 @@ ctx.bindings instead.`,
   return store.env as E;
 }
 
-export function requestLocal<T>(
-  key: symbol,
-  init: () => T,
-): T {
+export function requestLocal<T>(key: symbol, init: () => T): T {
   const store = requestStorage.getStore();
   if (!store) return init();
   const existing = store.locals.get(key);

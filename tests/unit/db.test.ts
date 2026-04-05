@@ -1,12 +1,5 @@
 import { drizzle } from "drizzle-orm/d1";
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bindings } from "../../src/framework/bindings";
 import { db } from "../../src/framework/db";
 
@@ -18,16 +11,14 @@ vi.mock("../../src/framework/bindings", () => {
   let store: Map<symbol, unknown> | undefined;
   return {
     bindings: vi.fn(),
-    requestLocal: vi.fn(
-      <T>(key: symbol, init: () => T): T => {
-        if (!store) return init();
-        const existing = store.get(key);
-        if (existing !== undefined) return existing as T;
-        const value = init();
-        store.set(key, value);
-        return value;
-      },
-    ),
+    requestLocal: vi.fn(<T>(key: symbol, init: () => T): T => {
+      if (!store) return init();
+      const existing = store.get(key);
+      if (existing !== undefined) return existing as T;
+      const value = init();
+      store.set(key, value);
+      return value;
+    }),
     _enableStore: () => {
       store = new Map();
     },
@@ -157,9 +148,7 @@ describe("db() request-scoped cache", () => {
   it("同じ D1 + schema でキャッシュが効く", () => {
     const fakeD1 = { fake: "d1" } as unknown as D1Database;
     const fakeSchema = { users: {} } as Record<string, unknown>;
-    mockedBindings.mockReturnValue(
-      { DB: fakeD1 } as unknown as Env,
-    );
+    mockedBindings.mockReturnValue({ DB: fakeD1 } as unknown as Env);
     const first = db({ schema: fakeSchema });
     const second = db({ schema: fakeSchema });
     expect(first).toBe(second);
@@ -168,9 +157,7 @@ describe("db() request-scoped cache", () => {
 
   it("同じ D1 でも schema が異なれば別インスタンス", () => {
     const fakeD1 = { fake: "d1" } as unknown as D1Database;
-    mockedBindings.mockReturnValue(
-      { DB: fakeD1 } as unknown as Env,
-    );
+    mockedBindings.mockReturnValue({ DB: fakeD1 } as unknown as Env);
     const schemaA = { users: {} } as Record<string, unknown>;
     const schemaB = { posts: {} } as Record<string, unknown>;
     const first = db({ schema: schemaA });
