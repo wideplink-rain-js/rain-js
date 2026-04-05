@@ -23,7 +23,7 @@ function printHelp() {
     dev      Start development server (codegen + watch + wrangler dev)
     build    Run code generation only
     routes   Display registered routes
-    db       D1 database management (init, generate, push, migrate, apply-local, studio)
+    db       D1 database management (init, generate, push, migrate, apply-local, seed, studio)
 
   Options:
     --help, -h     Show this help message
@@ -58,7 +58,10 @@ if (!VALID_COMMANDS.includes(command)) {
 
 if (command === "db") {
   const { handleDbCommand } = require("./commands/db");
-  handleDbCommand(process.argv[3]);
+  const flags = process.argv.slice(4);
+  handleDbCommand(process.argv[3], {
+    remote: flags.includes("--remote"),
+  });
   process.exit(0);
 }
 

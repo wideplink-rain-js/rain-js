@@ -10,6 +10,9 @@ const {
 const {
   dbIndexTemplate,
 } = require("../templates/db-index");
+const {
+  seedTemplate,
+} = require("../templates/seed");
 
 const SCHEMA_DIR = path.join(process.cwd(), "src", "db");
 const SCHEMA_FILE = path.join(SCHEMA_DIR, "schema.ts");
@@ -19,6 +22,12 @@ const DRIZZLE_CONFIG = path.join(
   "drizzle.config.ts",
 );
 const DRIZZLE_DIR = path.join(process.cwd(), "drizzle");
+const SEED_FILE = path.join(
+  process.cwd(),
+  "src",
+  "db",
+  "seed.sql",
+);
 const SAFE_NAME_RE = /^[\w.\-]+$/;
 
 const DB_SUBCOMMANDS = [
@@ -27,6 +36,7 @@ const DB_SUBCOMMANDS = [
   "push",
   "migrate",
   "apply-local",
+  "seed",
   "studio",
 ];
 
@@ -42,7 +52,11 @@ function printDbHelp() {
     push         Apply schema directly to D1 (remote)
     migrate      Run pending migrations (remote)
     apply-local  Apply migrations to local D1 (wrangler dev)
+    seed         Insert seed data into D1
     studio       Open Drizzle Studio (DB browser)
+
+  Flags:
+    --remote     Target remote D1 instead of local (seed)
 `);
 }
 
@@ -154,6 +168,17 @@ function dbInit() {
     console.log("     \u2713 drizzle.config.ts");
   }
 
+  if (fs.existsSync(SEED_FILE)) {
+    console.log(
+      "     \u2298 src/db/seed.sql " +
+        "\u306f\u65e2\u306b\u5b58\u5728\u3057\u307e\u3059" +
+        "\uff08\u30b9\u30ad\u30c3\u30d7\uff09",
+    );
+  } else {
+    fs.writeFileSync(SEED_FILE, seedTemplate());
+    console.log("     \u2713 src/db/seed.sql");
+  }
+
   console.log(
     "\n4/4  \u578b\u5b9a\u7fa9\u3092\u66f4\u65b0\u4e2d...",
   );
@@ -168,7 +193,9 @@ function dbInit() {
       "    2. npx rainjs db generate " +
       "\u3067\u30de\u30a4\u30b0\u30ec\u30fc\u30b7\u30e7\u30f3\u751f\u6210\n" +
       "    3. npx rainjs db push " +
-      "\u3067 D1 \u306b\u9069\u7528\n\n" +
+      "\u3067 D1 \u306b\u9069\u7528\n" +
+      "    4. npx rainjs db seed " +
+      "\u3067\u521d\u671f\u30c7\u30fc\u30bf\u6295\u5165\n\n" +
       "  \u30eb\u30fc\u30c8\u30cf\u30f3\u30c9\u30e9\u3067\u306e" +
       "\u4f7f\u3044\u65b9:\n\n" +
       '    import { db } from "../db";\n' +
@@ -357,6 +384,85 @@ function dbApplyLocal() {
   );
 }
 
+function dbSeed(options = {}) {
+  const d1Bindings = assertD1Configured();
+  const dbName = d1Bindings[0].database_name;
+
+  if (!dbName) {
+    console.error(
+      "[Rain] Error: database_name \u304c wrangler.toml " +
+        "\u306b\u898b\u3064\u304b\u308a\u307e\u305b\u3093\u3002\n" +
+        "  \u2192 [[d1_databases]] \u30bb\u30af\u30b7\u30e7\u30f3\u306b " +
+        'database_name = "my-db" \u3092\u8ffd\u52a0' +
+        "\u3057\u3066\u304f\u3060\u3055\u3044",
+    );
+    process.exit(1);
+  }
+
+  if (!SAFE_NAME_RE.test(dbName)) {
+    console.error(
+      "[Rain] Error: database_name \u306b\u4e0d\u6b63\u306a" +
+        "\u6587\u5b57\u304c\u542b\u307e\u308c\u3066\u3044\u307e\u3059: " +
+        dbName + "\n" +
+        "  \u2192 \u82f1\u6570\u5b57\u30fb\u30cf\u30a4\u30d5\u30f3\u30fb" +
+        "\u30a2\u30f3\u30c0\u30fc\u30b9\u30b3\u30a2\u306e\u307f" +
+        "\u4f7f\u7528\u3067\u304d\u307e\u3059",
+    );
+    process.exit(1);
+  }
+
+  if (!fs.existsSync(SEED_FILE)) {
+    console.error(
+      "[Rain] Error: src/db/seed.sql \u304c" +
+        "\u898b\u3064\u304b\u308a\u307e\u305b\u3093\u3002\n" +
+        "  \u2192 npx rainjs db init \u3067" +
+        "\u30b7\u30fc\u30c9\u30d5\u30a1\u30a4\u30eb\u3092" +
+        "\u751f\u6210\u3057\u3066\u304f\u3060\u3055\u3044\n" +
+        "  \u2192 \u307e\u305f\u306f\u624b\u52d5\u3067 " +
+        "src/db/seed.sql \u3092" +
+        "\u4f5c\u6210\u3057\u3066\u304f\u3060\u3055\u3044",
+    );
+    process.exit(1);
+  }
+
+  const target = options.remote
+    ? "\u30ea\u30e2\u30fc\u30c8"
+    : "\u30ed\u30fc\u30ab\u30eb";
+  console.log(
+    `[Rain] ${target} D1 "${dbName}" \u306b` +
+      "\u30b7\u30fc\u30c9\u30c7\u30fc\u30bf\u3092" +
+      "\u6295\u5165\u4e2d...\n",
+  );
+
+  const seedPath = path.join("src", "db", "seed.sql");
+  const args = [
+    "wrangler",
+    "d1",
+    "execute",
+    dbName,
+    ...(options.remote ? [] : ["--local"]),
+    `--file=${seedPath}`,
+  ];
+
+  const status = runCommand("npx", args);
+  if (status !== 0) {
+    console.error(
+      "\n[Rain] Error: \u30b7\u30fc\u30c9\u30c7\u30fc\u30bf\u306e" +
+        "\u6295\u5165\u306b\u5931\u6557\u3057\u307e\u3057\u305f\u3002\n" +
+        "  \u2192 src/db/seed.sql \u306e SQL \u3092" +
+        "\u78ba\u8a8d\u3057\u3066\u304f\u3060\u3055\u3044\n" +
+        "  \u2192 \u30c6\u30fc\u30d6\u30eb\u304c\u5b58\u5728\u3059\u308b\u304b" +
+        "\u78ba\u8a8d: npx rainjs db apply-local",
+    );
+    process.exit(1);
+  }
+
+  console.log(
+    "\n[Rain] \u30b7\u30fc\u30c9\u30c7\u30fc\u30bf\u306e\u6295\u5165\u304c" +
+      "\u5b8c\u4e86\u3057\u307e\u3057\u305f\u3002",
+  );
+}
+
 function dbStudio() {
   assertD1Configured();
   assertDrizzleInstalled();
@@ -367,7 +473,7 @@ function dbStudio() {
   runCommand("npx", ["drizzle-kit", "studio"]);
 }
 
-function handleDbCommand(subcommand) {
+function handleDbCommand(subcommand, options = {}) {
   if (
     !subcommand ||
     subcommand === "--help" ||
@@ -404,6 +510,9 @@ function handleDbCommand(subcommand) {
       break;
     case "apply-local":
       dbApplyLocal();
+      break;
+    case "seed":
+      dbSeed(options);
       break;
     case "studio":
       dbStudio();

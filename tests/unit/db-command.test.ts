@@ -4,12 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const _require = createRequire(import.meta.url);
 
 const mockGetD1Bindings = vi.fn((): Array<Record<string, string>> => []);
-const mockRunCommand = vi.fn(() => 0);
+const mockRunCommand = vi.fn((..._args: unknown[]) => 0);
 const mockNpmInstall = vi.fn(() => 0);
 const mockStripControlChars = vi.fn((s: string) => s);
 const mockSchemaTemplate = vi.fn(() => "schema");
 const mockDrizzleConfigTemplate = vi.fn(() => "config");
 const mockDbIndexTemplate = vi.fn(() => "db-index");
+const mockSeedTemplate = vi.fn(() => "seed-data");
 const mockExistsSync = vi.fn((..._args: unknown[]) => false);
 const mockMkdirSync = vi.fn();
 const mockWriteFileSync = vi.fn();
@@ -43,6 +44,9 @@ function patchDependencies() {
   const dbIndex = _require("../../cli/templates/db-index");
   dbIndex.dbIndexTemplate = mockDbIndexTemplate;
 
+  const seed = _require("../../cli/templates/seed");
+  seed.seedTemplate = mockSeedTemplate;
+
   fsModule.existsSync = mockExistsSync;
   fsModule.mkdirSync = mockMkdirSync;
   fsModule.writeFileSync = mockWriteFileSync;
@@ -57,7 +61,10 @@ function restoreFs() {
 }
 
 describe("handleDbCommand", () => {
-  let handleDbCommand: (subcommand?: string) => void;
+  let handleDbCommand: (
+    subcommand?: string,
+    options?: { remote?: boolean },
+  ) => void;
   let exitSpy: ReturnType<typeof vi.spyOn>;
   let logSpy: ReturnType<typeof vi.spyOn>;
   let errorSpy: ReturnType<typeof vi.spyOn>;
@@ -80,6 +87,7 @@ describe("handleDbCommand", () => {
     mockSchemaTemplate.mockReset().mockReturnValue("schema");
     mockDrizzleConfigTemplate.mockReset().mockReturnValue("config");
     mockDbIndexTemplate.mockReset().mockReturnValue("db-index");
+    mockSeedTemplate.mockReset().mockReturnValue("seed-data");
 
     patchDependencies();
 
@@ -293,6 +301,81 @@ describe("handleDbCommand", () => {
       mockReaddirSync.mockReturnValue(["0001_init.sql", "0002_add-users.sql"]);
       handleDbCommand("apply-local");
       expect(mockRunCommand).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("db seed", () => {
+    beforeEach(() => {
+      mockGetD1Bindings.mockReturnValue([
+        {
+          binding: "DB",
+          database_name: "test-db",
+          database_id: "abc",
+        },
+      ]);
+    });
+
+    it("D1 バインディングなしで exit(1)", () => {
+      mockGetD1Bindings.mockReturnValue([]);
+      expect(() => handleDbCommand("seed")).toThrow("process.exit(1)");
+    });
+
+    it("database_name がない場合 exit(1)", () => {
+      mockGetD1Bindings.mockReturnValue([
+        {
+          binding: "DB",
+          database_name: "",
+          database_id: "x",
+        },
+      ]);
+      expect(() => handleDbCommand("seed")).toThrow("process.exit(1)");
+    });
+
+    it("database_name に不正文字がある場合 exit(1)", () => {
+      mockGetD1Bindings.mockReturnValue([
+        {
+          binding: "DB",
+          database_name: "my;db",
+          database_id: "x",
+        },
+      ]);
+      expect(() => handleDbCommand("seed")).toThrow("process.exit(1)");
+    });
+
+    it("seed.sql が存在しない場合 exit(1)", () => {
+      mockExistsSync.mockReturnValue(false);
+      expect(() => handleDbCommand("seed")).toThrow("process.exit(1)");
+      expect(errorSpy).toHaveBeenCalled();
+    });
+
+    it("正常時に --local 付きでコマンドが実行される", () => {
+      mockExistsSync.mockReturnValue(true);
+      handleDbCommand("seed");
+      expect(mockRunCommand).toHaveBeenCalledWith(
+        "npx",
+        expect.arrayContaining([
+          "wrangler",
+          "d1",
+          "execute",
+          "test-db",
+          "--local",
+        ]),
+      );
+    });
+
+    it("--remote 時に --local なしでコマンドが実行される", () => {
+      mockExistsSync.mockReturnValue(true);
+      handleDbCommand("seed", { remote: true });
+      const args = mockRunCommand.mock.calls[0]?.[1] as string[] | undefined;
+      expect(args).toContain("wrangler");
+      expect(args).toContain("test-db");
+      expect(args).not.toContain("--local");
+    });
+
+    it("runCommand 失敗時に exit(1)", () => {
+      mockExistsSync.mockReturnValue(true);
+      mockRunCommand.mockReturnValue(1);
+      expect(() => handleDbCommand("seed")).toThrow("process.exit(1)");
     });
   });
 });
