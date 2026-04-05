@@ -1,6 +1,6 @@
 {
   "name": "@rainfw/core",
-  "version": "0.2.15",
+  "version": "0.2.16",
   "description": "A TypeScript web framework for Cloudflare Workers",
   "bin": {
     "rainjs": "./cli/index.js"

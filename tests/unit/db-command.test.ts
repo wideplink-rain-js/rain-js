@@ -9,6 +9,7 @@ const mockNpmInstall = vi.fn(() => 0);
 const mockStripControlChars = vi.fn((s: string) => s);
 const mockSchemaTemplate = vi.fn(() => "schema");
 const mockDrizzleConfigTemplate = vi.fn(() => "config");
+const mockDbIndexTemplate = vi.fn(() => "db-index");
 const mockExistsSync = vi.fn((..._args: unknown[]) => false);
 const mockMkdirSync = vi.fn();
 const mockWriteFileSync = vi.fn();
@@ -38,6 +39,9 @@ function patchDependencies() {
 
   const drizzleConfig = _require("../../cli/templates/drizzle-config");
   drizzleConfig.drizzleConfigTemplate = mockDrizzleConfigTemplate;
+
+  const dbIndex = _require("../../cli/templates/db-index");
+  dbIndex.dbIndexTemplate = mockDbIndexTemplate;
 
   fsModule.existsSync = mockExistsSync;
   fsModule.mkdirSync = mockMkdirSync;
@@ -75,6 +79,7 @@ describe("handleDbCommand", () => {
     mockStripControlChars.mockReset().mockImplementation((s: string) => s);
     mockSchemaTemplate.mockReset().mockReturnValue("schema");
     mockDrizzleConfigTemplate.mockReset().mockReturnValue("config");
+    mockDbIndexTemplate.mockReset().mockReturnValue("db-index");
 
     patchDependencies();
 
@@ -147,6 +152,7 @@ describe("handleDbCommand", () => {
       mockExistsSync
         .mockReturnValueOnce(false)
         .mockReturnValueOnce(false)
+        .mockReturnValueOnce(false)
         .mockReturnValueOnce(false);
       handleDbCommand("init");
       expect(mockWriteFileSync).toHaveBeenCalledWith(
@@ -159,6 +165,7 @@ describe("handleDbCommand", () => {
       mockExistsSync
         .mockReturnValueOnce(true)
         .mockReturnValueOnce(true)
+        .mockReturnValueOnce(false)
         .mockReturnValueOnce(false);
       handleDbCommand("init");
       expect(mockWriteFileSync).not.toHaveBeenCalledWith(
@@ -171,10 +178,37 @@ describe("handleDbCommand", () => {
       mockExistsSync
         .mockReturnValueOnce(true)
         .mockReturnValueOnce(false)
+        .mockReturnValueOnce(false)
         .mockReturnValueOnce(true);
       handleDbCommand("init");
       expect(mockWriteFileSync).not.toHaveBeenCalledWith(
         expect.stringContaining("drizzle.config.ts"),
+        expect.anything(),
+      );
+    });
+
+    it("index.ts が存在しない場合 writeFileSync で作成", () => {
+      mockExistsSync
+        .mockReturnValueOnce(false)
+        .mockReturnValueOnce(false)
+        .mockReturnValueOnce(false)
+        .mockReturnValueOnce(false);
+      handleDbCommand("init");
+      expect(mockWriteFileSync).toHaveBeenCalledWith(
+        expect.stringContaining("index.ts"),
+        "db-index",
+      );
+    });
+
+    it("index.ts が既に存在する場合スキップ", () => {
+      mockExistsSync
+        .mockReturnValueOnce(true)
+        .mockReturnValueOnce(false)
+        .mockReturnValueOnce(true)
+        .mockReturnValueOnce(false);
+      handleDbCommand("init");
+      expect(mockWriteFileSync).not.toHaveBeenCalledWith(
+        expect.stringContaining("index.ts"),
         expect.anything(),
       );
     });

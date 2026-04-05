@@ -7,9 +7,13 @@ const { schemaTemplate } = require("../templates/schema");
 const {
   drizzleConfigTemplate,
 } = require("../templates/drizzle-config");
+const {
+  dbIndexTemplate,
+} = require("../templates/db-index");
 
 const SCHEMA_DIR = path.join(process.cwd(), "src", "db");
 const SCHEMA_FILE = path.join(SCHEMA_DIR, "schema.ts");
+const INDEX_FILE = path.join(SCHEMA_DIR, "index.ts");
 const DRIZZLE_CONFIG = path.join(
   process.cwd(),
   "drizzle.config.ts",
@@ -128,6 +132,17 @@ function dbInit() {
     console.log("     \u2713 src/db/schema.ts");
   }
 
+  if (fs.existsSync(INDEX_FILE)) {
+    console.log(
+      "     \u2298 src/db/index.ts " +
+        "\u306f\u65e2\u306b\u5b58\u5728\u3057\u307e\u3059" +
+        "\uff08\u30b9\u30ad\u30c3\u30d7\uff09",
+    );
+  } else {
+    fs.writeFileSync(INDEX_FILE, dbIndexTemplate());
+    console.log("     \u2713 src/db/index.ts");
+  }
+
   if (fs.existsSync(DRIZZLE_CONFIG)) {
     console.log(
       "     \u2298 drizzle.config.ts " +
@@ -156,8 +171,8 @@ function dbInit() {
       "\u3067 D1 \u306b\u9069\u7528\n\n" +
       "  \u30eb\u30fc\u30c8\u30cf\u30f3\u30c9\u30e9\u3067\u306e" +
       "\u4f7f\u3044\u65b9:\n\n" +
-      '    import { db } from "../../framework/db";\n' +
-      '    import { todos } from "../../db/schema";\n\n' +
+      '    import { db } from "../db";\n' +
+      '    import { todos } from "../db/schema";\n\n' +
       "    export const GET: Handler = async (ctx) => {\n" +
       "      const rows = await db().select().from(todos);\n" +
       "      return ctx.json(rows);\n" +
